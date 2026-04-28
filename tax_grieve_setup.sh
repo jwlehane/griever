@@ -22,14 +22,10 @@ pip install requests
 
 # 4. Install standard MCP servers globally via npm
 echo "Installing MCP servers..."
-npm install -g @modelcontextprotocol/server-playwright
 npm install -g @modelcontextprotocol/server-sqlite
 npm install -g @modelcontextprotocol/server-filesystem
 
-# 5. Setup Playwright browsers
-npx playwright install chromium
-
-# 6. Initialize local SQLite database file
+# 5. Initialize local SQLite database file
 touch grievance_data.db
 
 echo "Setup complete."
@@ -45,10 +41,6 @@ echo '{
     "sqlite": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sqlite", "grievance_data.db"]
-    },
-    "playwright": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-playwright"]
     }
   }
 }'

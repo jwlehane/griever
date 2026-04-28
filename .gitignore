@@ -1,0 +1,8 @@
+tax-grieve-env/
+__pycache__/
+*.pyc
+*.db
+discovery_results.json
+reports/
+*.pdf
+.env

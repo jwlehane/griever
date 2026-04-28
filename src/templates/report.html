@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Grievance Report - {{ subject.address }}</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 40px auto; padding: 20px; }
+        .header { border-bottom: 2px solid #2c3e50; padding-bottom: 10px; margin-bottom: 30px; }
+        .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
+        .stat-box { background: #f8f9fa; padding: 15px; border-radius: 4px; border-left: 4px solid #27ae60; }
+        .stat-box h4 { margin: 0; color: #7f8c8d; font-size: 12px; text-transform: uppercase; }
+        .stat-box p { margin: 5px 0 0; font-size: 20px; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
+        th { background: #f2f2f2; }
+        .narrative { background: #fffde7; padding: 20px; border-radius: 4px; font-style: italic; border: 1px solid #ffe57f; }
+        .alert-box { background: #fff3e0; border: 1px solid #ffb74d; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+        .btn-print { background: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; float: right; }
+    </style>
+</head>
+<body>
+    <a href="#" class="btn-print" onclick="window.print()">Print Report</a>
+    <div class="header">
+        <h1>Property Tax Grievance Report</h1>
+        <h3>{{ subject.address }}</h3>
+    </div>
+
+    <div class="stat-grid">
+        <div class="stat-box">
+            <h4>Current Assessment</h4>
+            <p>${{ "{:,.0f}".format(subject.assessment_2025) }}</p>
+        </div>
+        <div class="stat-box">
+            <h4>Market Value (Est)</h4>
+            <p>${{ "{:,.0f}".format(market_value) }}</p>
+        </div>
+        <div class="stat-box">
+            <h4>Recommended Reduction</h4>
+            <p style="color: {{ '#c0392b' if reduction > 0 else '#7f8c8d' }};">
+                ${{ "{:,.0f}".format(reduction) if reduction > 0 else '0' }}
+            </p>
+        </div>
+    </div>
+
+    {% if reduction <= 0 %}
+    <div class="alert-box">
+        <strong>⚠️ Recommendation: No Grievance Advised</strong><br>
+        Based on available comparable sales, your property's estimated market value is higher than or equal to its current assessment. 
+        Filing a grievance may not be successful at this time.
+    </div>
+    {% endif %}
+
+    <h2>Subject Characteristics</h2>
+    <ul>
+        <li><strong>Living Area:</strong> {{ "{:,.0f}".format(subject.sqft) }} sq. ft.</li>
+        <li><strong>Acreage:</strong> {{ subject.acreage }} acres</li>
+        <li><strong>Bedrooms/Baths:</strong> {{ subject.bedrooms }} / {{ subject.bathrooms }}</li>
+        <li><strong>Year Built:</strong> {{ subject.year_built }}</li>
+    </ul>
+
+    <h2>Comparable Sales (Adjusted)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Comp Address</th>
+                <th>Sale Price</th>
+                <th>Adjusted Value</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for comp in comps %}
+            <tr>
+                <td>{{ comp.address }}</td>
+                <td>${{ "{:,.0f}".format(comp.sale_price) }}</td>
+                <td><strong>${{ "{:,.0f}".format(comp.reconciled_value) }}</strong></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Suggestion Engine</h2>
+    <div style="background: #e3f2fd; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+        <ul style="margin: 0; padding-left: 20px;">
+            {% set outliers = [] %}
+            {% for comp in comps %}
+                {% if (comp.reconciled_value - market_value)|abs / market_value > 0.25 %}
+                    <li>⚠️ <strong>Outlier:</strong> {{ comp.address }} is significantly {{ "high" if comp.reconciled_value > market_value else "low" }} (${{ "{:,.0f}".format(comp.reconciled_value) }}). 
+                        Consider removing this to refine the valuation.</li>
+                    {% set _ = outliers.append(1) %}
+                {% endif %}
+            {% endfor %}
+            {% if reduction > 0 %}
+                <li>✅ <strong>Ready for Submission:</strong> Use the narrative below for your RP-524 form.</li>
+            {% else %}
+                <li>ℹ️ <strong>Optimization Needed:</strong> Consider finding lower-priced comparable sales to support a reduction.</li>
+            {% endif %}
+        </ul>
+    </div>
+
+    {% if reduction > 0 %}
+    <h2>Grievance Narrative (Form RP-524)</h2>
+    <div class="narrative">
+        The subject property located at {{ subject.address }} is currently assessed at ${{ "{:,.0f}".format(subject.assessment_2025) }}. 
+        Based on a review of {{ "{:,.0f}".format(subject.sqft) }} sq. ft. comparable residential sales in the immediate market area, 
+        the indicated market value is approximately ${{ "{:,.0f}".format(market_value) }}. 
+        
+        Adjustments were made for differences in square footage, acreage, and utility to arrive at this figure. 
+        I respectfully request that the assessment be reduced to ${{ "{:,.0f}".format(market_value) }} to align with fair market value.
+    </div>
+    {% endif %}
+
+    <div style="margin-top: 50px; text-align: center; color: #bdc3c7; font-size: 12px;">
+        Generated by TaxGrieve Rhinebeck. Confidentially built for private use.
+    </div>
+</body>
+</html>

@@ -6,14 +6,15 @@
 ## MCP Servers
 - **Filesystem MCP:** For reading/writing local files and drafting documents.
 - **SQLite MCP:** For data storage, normalization, and valuation math.
-- **Playwright MCP:** For web scraping ParcelAccess data.
+- **Cloud Run MCP:** For potential deployment of the service.
 
 ## Languages & Tools
-- **Python 3.11:** For the virtual environment and potential helper scripts.
-- **Bash/cURL:** For RapidAPI discovery requests.
+- **Python 3.11:** For the virtual environment, data processing scripts, and potential API wrapper.
+- **Bash/cURL:** For RapidAPI and ParcelAccess direct API requests.
 - **Node.js/npm:** For running MCP servers.
-- **SQLite:** Local database file `grievance_data.db`.
+- **SQLite:** Database `grievance_data.db`.
 
 ## External APIs
 - **RapidAPI (Real-Time Real-Estate Data):** Source for recent sales comps.
-- **Dutchess County ParcelAccess:** Official source for property records.
+- **Dutchess County ParcelAccess:** Direct ASP API endpoints for official property records.
+- **Google Cloud Run:** Targeted hosting platform for the final service.

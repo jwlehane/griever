@@ -5,7 +5,7 @@
 - Pipe JSON results into the CLI context.
 
 ## Phase 2: Verification
-- Use Playwright MCP to visit ParcelAccess for specific addresses.
+- Use Direct API calls to query ParcelAccess for specific addresses.
 - Extract: SBL, 2026 assessed value, square footage, bedrooms/bathrooms, acreage.
 
 ## Phase 3: Storage & Normalization

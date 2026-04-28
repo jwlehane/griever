@@ -4,5 +4,5 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-- [ ] **Track: Implement Property Data Discovery and SQLite Normalization**
+- [~] **Track: Implement Property Data Discovery and SQLite Normalization**
   *Link: [./tracks/discovery_normalization_20260427/](./tracks/discovery_normalization_20260427/)*
