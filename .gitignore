@@ -1,8 +1,30 @@
+# Environment
 tax-grieve-env/
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Databases
 *.db
+*.sqlite3
+
+# Project Specific
 discovery_results.json
 reports/
 *.pdf
-.env
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
