@@ -82,41 +82,31 @@ def main():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
+    core = TaxGrieveCore()
+
     for comp in COMPS:
-        parcel_data = search_parcel(comp)
+        parcel_data = core.search_address(comp['address'].split(' ')[0], ' '.join(comp['address'].split(' ')[1:]), swis=comp['swis'])
         if not parcel_data:
             print(f"  FAILED to find parcel for {comp['address']}")
             continue
         
-        parcelgrid = parcel_data['parcelgrid']
-        parcel_id = parcel_data['parcel_id']
-        swis = parcel_data['swis']
-        
-        # Get physical details
-        details_resp = get_details(parcel_id, swis)
-        if not details_resp.get('success'):
+        # Use simplified enrichment
+        official_data = core.get_full_rps_data(parcel_data['parcelgrid'])
+        if not official_data:
             print(f"  FAILED to get details for {comp['address']}")
             continue
         
-        details = details_resp['data']
-        res_bldg = details.get('resbldg', [{}])[0]
-        
-        sfla = res_bldg.get('sfla', 0)
-        yr_built = res_bldg.get('yr_built', 0)
-        bedrooms = res_bldg.get('nbr_bedrooms', 0)
-        bathrooms = res_bldg.get('nbr_full_baths', 0) + (0.5 * res_bldg.get('nbr_half_baths', 0))
-        acreage = parcel_data.get('acreage', 0)
-        
-        print(f"  Found: {sfla} sqft, {acreage} acres, Built {yr_built}")
+        print(f"  Found: {official_data['sqft']} sqft, {official_data['acreage']} acres, Built {official_data['year_built']}")
         
         # Insert into sales_comps
         cursor.execute("""
             INSERT OR REPLACE INTO sales_comps 
-            (address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL_ENRICHED')
         """, (
-            comp['address'], parcelgrid, comp['sale_price'], comp['sale_date'],
-            sfla, acreage, bedrooms, bathrooms, yr_built
+            official_data['address'], official_data['sbl'], comp['sale_price'], comp['sale_date'],
+            official_data['sqft'], official_data['acreage'], official_data['bedrooms'], official_data['bathrooms'], 
+            official_data['year_built']
         ))
         
         # Throttling to be polite to the API

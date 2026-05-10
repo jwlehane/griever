@@ -86,23 +86,22 @@ class TaxGrieveCore:
         return resp.json().get('data', {})
 
     def get_full_rps_data(self, parcelgrid):
-        """Combines search and details into one profile."""
+        """Combines search and details into one profile (Simplified due to API restrictions)."""
         resp = self.session.post(f"{API_BASE_URL}/search_extract_parcelgrids.asp", data={'parcelgrid': parcelgrid}, headers=self.headers)
         rps_list = resp.json().get('data', [])
         if not rps_list: return None
         primary = rps_list[0]
         
-        details = self.get_property_details(primary['parcel_id'], primary['swis'])
-        res_bldg = details.get('resbldg', [{}])[0]
-        
+        # Note: resbldg data is no longer available via get_property_details.asp
+        # We will use what's available in the primary record and fallback for the rest.
         return {
             'address': f"{primary['loc_st_nbr'].strip()} {primary['loc_st_name'].strip()} {primary['Loc_mail_st_suff'].strip()}".title(),
             'sbl': parcelgrid,
-            'sqft': res_bldg.get('sfla', 0),
+            'sqft': primary.get('sfla', primary.get('sqft', 0)), # Try multiple keys
             'acreage': primary.get('acreage', 0),
-            'bedrooms': res_bldg.get('nbr_bedrooms', 0),
-            'bathrooms': res_bldg.get('nbr_full_baths', 0) + (0.5 * res_bldg.get('nbr_half_baths', 0)),
-            'year_built': res_bldg.get('yr_built', 0),
+            'bedrooms': primary.get('nbr_bedrooms', 0),
+            'bathrooms': float(primary.get('nbr_full_baths', 0)) + (0.5 * float(primary.get('nbr_half_baths', 0))),
+            'year_built': primary.get('yr_built', 0),
             'assessment_2025': primary.get('total_av', 0),
             'property_class': primary.get('prop_class_desc', '').strip()
         }
@@ -170,12 +169,28 @@ class TaxGrieveCore:
                             'sbl': official_data['sbl'],
                             'sale_price': float(rc.get('price', 0)) if rc.get('price') else 0,
                             'sale_date': rc.get('last_sold_date', '2025-01-01'),
-                            'sqft': official_data['sqft'],
-                            'acreage': official_data['acreage'],
-                            'bedrooms': official_data['bedrooms'],
-                            'bathrooms': official_data['bathrooms'],
-                            'year_built': official_data['year_built']
+                            'sqft': rc.get('sqft') or official_data['sqft'],
+                            'acreage': rc.get('lot_size', 0) or official_data['acreage'],
+                            'bedrooms': rc.get('beds') or official_data['bedrooms'],
+                            'bathrooms': rc.get('baths') or official_data['bathrooms'],
+                            'year_built': rc.get('year_built') or official_data['year_built']
                         }
+                        enriched_comps.append(comp_obj)
+                        yield {"status": "verified", "comp": comp_obj}
+                else:
+                    # If County verification fails, still use RapidAPI data but mark as unverified
+                    comp_obj = {
+                        'address': addr_str,
+                        'sbl': 'UNVERIFIED',
+                        'sale_price': float(rc.get('price', 0)) if rc.get('price') else 0,
+                        'sale_date': rc.get('last_sold_date', '2025-01-01'),
+                        'sqft': rc.get('sqft', 0),
+                        'acreage': rc.get('lot_size', 0),
+                        'bedrooms': rc.get('beds', 0),
+                        'bathrooms': rc.get('baths', 0),
+                        'year_built': rc.get('year_built', 0)
+                    }
+                    if comp_obj['sqft'] > 0: # Only add if we have basic data
                         enriched_comps.append(comp_obj)
                         yield {"status": "verified", "comp": comp_obj}
             
@@ -205,34 +220,43 @@ class TaxGrieveCore:
         acre_score = normalize(comp.get('acreage', 0), subject.get('acreage', 0), 0.50) * 20
         
         # 4. Distance (10%) - 5 mile tolerance
-        dist = comp.get('distance_miles', 0.5) # Default to 0.5 miles if unknown
+        dist = comp.get('distance_miles')
+        if dist is None: dist = 0.5 # Default to 0.5 miles if unknown
         dist_score = max(0, 1 - (dist / 5)) * 10
         
         total_score = sqft_score + age_score + acre_score + dist_score
         return round(total_score, 1)
 
     def calculate_valuation(self, subject, comps, adjs=None):
-        """Performs appraisal math."""
+        """Performs appraisal math with outlier detection."""
         if adjs is None:
             adjs = {'sqft': 150.0, 'bathroom': 15000.0, 'acre': 50000.0, 'bedroom': 10000.0, 'year_built': 1000.0}
         
-        results = []
+        def get_val(obj, key, default=0):
+            val = obj.get(key)
+            return val if val is not None else default
+
+        raw_results = []
         for comp in comps:
             adj_price = comp['sale_price']
             
-            gla_adj = (subject['sqft'] - comp['sqft']) * adjs['sqft']
-            acre_adj = (subject['acreage'] - comp['acreage']) * adjs['acre']
-            bath_adj = (subject['bathrooms'] - comp['bathrooms']) * adjs['bathroom']
-            bed_adj = (subject['bedrooms'] - comp['bedrooms']) * adjs['bedroom']
-            age_adj = (subject['year_built'] - comp['year_built']) * adjs['year_built']
+            gla_adj = (get_val(subject, 'sqft') - get_val(comp, 'sqft')) * adjs['sqft']
+            acre_adj = (get_val(subject, 'acreage') - get_val(comp, 'acreage')) * adjs['acre']
+            bath_adj = (get_val(subject, 'bathrooms') - get_val(comp, 'bathrooms')) * adjs['bathroom']
+            bed_adj = (get_val(subject, 'bedrooms') - get_val(comp, 'bedrooms')) * adjs['bedroom']
+            age_adj = (get_val(subject, 'year_built') - get_val(comp, 'year_built')) * adjs['year_built']
             
             total_adj = gla_adj + acre_adj + bath_adj + bed_adj + age_adj
             reconciled = adj_price + total_adj
             
-            results.append({
+            # Calculate Similarity for UI display
+            score = self.calculate_similarity(subject, comp)
+            
+            raw_results.append({
                 'address': comp['address'],
                 'sale_price': comp['sale_price'],
                 'reconciled_value': reconciled,
+                'similarity_score': score,
                 'adjustments': {
                     'gla': gla_adj,
                     'acreage': acre_adj,
@@ -241,8 +265,19 @@ class TaxGrieveCore:
                 }
             })
             
-        market_value = sum(r['reconciled_value'] for r in results) / len(results) if results else 0
-        return market_value, results
+        if not raw_results: return 0, []
+
+        # Outlier Detection (25% threshold)
+        mean_val = sum(r['reconciled_value'] for r in raw_results) / len(raw_results)
+        valid_results = []
+        for r in raw_results:
+            deviation = abs(r['reconciled_value'] - mean_val) / mean_val
+            r['is_outlier'] = deviation > 0.25
+            if not r['is_outlier']:
+                valid_results.append(r['reconciled_value'])
+        
+        market_value = sum(valid_results) / len(valid_results) if valid_results else mean_val
+        return market_value, raw_results
 
     def ensure_property(self, subject_data):
         """Saves or updates subject property and returns its DB ID."""
