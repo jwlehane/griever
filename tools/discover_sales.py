@@ -1,6 +1,12 @@
 import requests
 import sqlite3
 import time
+import sys
+import os
+
+# Add src to path for core logic
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
+from app.core import TaxGrieveCore
 
 DB_PATH = 'grievance_data.db'
 API_BASE_URL = "https://gis.dutchessny.gov/parcelaccess/asp"
@@ -41,6 +47,7 @@ def discover_sales(session, subject, min_sale_date="01/01/2024"):
     }
     
     resp = session.post(f"{API_BASE_URL}/search_residential_sales.asp", data=params, headers=headers)
+    print(f"DEBUG: Status {resp.status_code}, Body: {resp.text[:200]}")
     
     try:
         data = resp.json()
@@ -67,22 +74,44 @@ def main():
         sales = discover_sales(session, subject)
         print(f"  Found {len(sales)} potential comps for {subject['address']}.")
         
+        # Prepare for scoring
+        core = TaxGrieveCore()
+        scored_sales = []
+
         for sale in sales:
-            # Normalize address format
+            # Map API fields to our format for scoring
+            baths = float(sale.get('nbr_full_baths', 0)) + (0.5 * float(sale.get('nbr_half_baths', 0)))
+            comp_data = {
+                'sqft': sale.get('sfla', 0),
+                'year_built': sale.get('yr_built', 0),
+                'acreage': sale.get('acreage', 0),
+                'distance_miles': 0.5 # Placeholder for now
+            }
+            score = core.calculate_similarity(dict(subject), comp_data)
+            
+            # Normalize address
             addr = f"{sale['loc_st_nbr'].strip()} {sale['loc_st_name'].strip()} {sale['Loc_mail_st_suff'].strip()}".title()
             
-            # Map API fields to our DB fields
-            # Note: bathrooms = full + 0.5 * half
-            baths = float(sale.get('nbr_full_baths', 0)) + (0.5 * float(sale.get('nbr_half_baths', 0)))
-            
+            scored_sales.append({
+                'data': sale,
+                'address': addr,
+                'bathrooms': baths,
+                'score': score
+            })
+
+        # Sort by similarity score descending
+        scored_sales.sort(key=lambda x: x['score'], reverse=True)
+
+        for item in scored_sales:
+            sale = item['data']
             cursor.execute("""
                 INSERT OR REPLACE INTO sales_comps 
-                (address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, target_property_id, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'API_DISCOVERY')
+                (address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, target_property_id, source, similarity_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'API_DISCOVERY', ?)
             """, (
-                addr, sale['parcelgrid'], sale['sale_price'], sale['sale_date'],
-                sale['sfla'], sale['acreage'], sale['nbr_bedrooms'], baths,
-                sale['yr_built'], subject['id']
+                item['address'], sale['parcelgrid'], sale['sale_price'], sale['sale_date'],
+                sale['sfla'], sale['acreage'], sale['nbr_bedrooms'], item['bathrooms'],
+                sale['yr_built'], subject['id'], item['score']
             ))
         
         time.sleep(1) # Be kind

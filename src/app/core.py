@@ -184,6 +184,33 @@ class TaxGrieveCore:
         except Exception as e:
             yield {"status": "error", "message": f"Discovery Error: {str(e)}"}
 
+    def calculate_similarity(self, subject, comp):
+        """
+        Calculates a similarity score (0-100) between subject and comp.
+        Weights: Sqft (40%), Year Built (30%), Acreage (20%), Distance (10%).
+        """
+        def normalize(val, target, tolerance):
+            if target == 0: return 0
+            diff = abs(val - target)
+            return max(0, 1 - (diff / (target * tolerance)))
+
+        # 1. SQFT (40%) - 20% tolerance
+        sqft_score = normalize(comp.get('sqft', 0), subject.get('sqft', 0), 0.20) * 40
+        
+        # 2. Year Built (30%) - 50 year tolerance
+        age_diff = abs(comp.get('year_built', 0) - subject.get('year_built', 0))
+        age_score = max(0, 1 - (age_diff / 50)) * 30
+        
+        # 3. Acreage (20%) - 50% tolerance
+        acre_score = normalize(comp.get('acreage', 0), subject.get('acreage', 0), 0.50) * 20
+        
+        # 4. Distance (10%) - 5 mile tolerance
+        dist = comp.get('distance_miles', 0.5) # Default to 0.5 miles if unknown
+        dist_score = max(0, 1 - (dist / 5)) * 10
+        
+        total_score = sqft_score + age_score + acre_score + dist_score
+        return round(total_score, 1)
+
     def calculate_valuation(self, subject, comps, adjs=None):
         """Performs appraisal math."""
         if adjs is None:

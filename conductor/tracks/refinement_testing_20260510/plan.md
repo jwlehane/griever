@@ -1,9 +1,9 @@
 # Implementation Plan: Refine Automated Discovery & Valuation with Robust Testing
 
 ## Phase 1: Similarity Scoring (Automated Discovery)
-- [ ] Task: Implement `calculate_similarity` in `src/app/core.py`. Factors: Sqft (40%), Year Built (30%), Acreage (20%), Distance (10%).
-- [ ] Task: Update `tools/discover_sales.py` to sort results by similarity score before inserting into DB.
-- [ ] Task: Update `sales_comps` table schema to include `similarity_score` column.
+- [x] Task: Implement `calculate_similarity` in `src/app/core.py`. Factors: Sqft (40%), Year Built (30%), Acreage (20%), Distance (10%).
+- [x] Task: Update `tools/discover_sales.py` to sort results by similarity score before inserting into DB.
+- [x] Task: Update `sales_comps` table schema to include `similarity_score` column.
 
 ## Phase 2: Outlier Detection (Valuation Engine)
 - [ ] Task: Implement `detect_outliers` in `tools/calculate_valuation.py`. Mark comps with >25% reconciled value variance from the mean.
