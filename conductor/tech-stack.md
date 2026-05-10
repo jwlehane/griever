@@ -9,8 +9,9 @@
 - **Cloud Run MCP:** For potential deployment of the service.
 
 ## Languages & Tools
-- **Python 3.11:** For the virtual environment, data processing scripts, and potential API wrapper.
-- **Bash/cURL:** For RapidAPI and ParcelAccess direct API requests.
+- **Python 3.11:** Primary language for data processing and API.
+- **Pytest:** Automated unit and integration testing framework.
+- **Bash/cURL:** For RapidAPI and ParcelAccess requests.
 - **Node.js/npm:** For running MCP servers.
 - **SQLite:** Database `grievance_data.db`.
 
