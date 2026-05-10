@@ -19,33 +19,35 @@ COMPS = [
 
 def search_parcel(address_dict):
     """Finds the parcelgrid and parcelid for an address."""
-    # Robust parsing
     import re
-    raw_addr = address_dict['address'].upper()
+    raw_addr = address_dict['address'].upper().strip()
     
-    # Handle prefixes
-    predir = ""
-    if raw_addr.startswith("65 N "):
-        number = "65"
-        predir = "N"
-        street = "PARSONAGE"
-    elif raw_addr.startswith("72 "):
-        number = "72"
-        street = "OLD FARM"
-    elif raw_addr.startswith("1557 "):
-        number = "1557"
-        street = "CENTRE"
-    elif raw_addr.startswith("38 "):
-        number = "38"
-        street = "CHESTNUT"
-    elif raw_addr.startswith("14 "):
-        number = "14"
-        street = "OAK"
+    # Standardize prefixes
+    if raw_addr.startswith("NORTH "): raw_addr = raw_addr.replace("NORTH ", "N ", 1)
+    elif raw_addr.startswith("SOUTH "): raw_addr = raw_addr.replace("SOUTH ", "S ", 1)
+    elif raw_addr.startswith("EAST "): raw_addr = raw_addr.replace("EAST ", "E ", 1)
+    elif raw_addr.startswith("WEST "): raw_addr = raw_addr.replace("WEST ", "W ", 1)
+
+    # Basic Regex for Number, Prefix, Street
+    # Matches: "123 Main", "123 N Main", "123 North Main" (pre-handled above)
+    match = re.match(r'^(\d+)\s+(N|S|E|W)?\s*(.*)$', raw_addr)
+    
+    if match:
+        number, predir, street = match.groups()
+        predir = predir or ""
+        # Strip common suffixes for the API
+        suffixes = [" STREET", " ST", " ROAD", " RD", " AVENUE", " AVE", " DRIVE", " DR", " LANE", " LN", " COURT", " CT", " PLACE", " PL"]
+        clean_street = street.strip()
+        for s in suffixes:
+            if clean_street.endswith(s):
+                clean_street = clean_street[:len(clean_street)-len(s)]
+                break
+        street = clean_street
     else:
-        # Fallback
-        parts = address_dict['address'].split(' ', 1)
+        parts = raw_addr.split(' ', 1)
         number = parts[0]
-        street = parts[1].split(' ')[0].upper()
+        street = parts[1] if len(parts) > 1 else ""
+        predir = ""
 
     params = {
         'number': number,

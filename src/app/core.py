@@ -107,6 +107,83 @@ class TaxGrieveCore:
             'property_class': primary.get('prop_class_desc', '').strip()
         }
 
+    def discover_comps_live(self, subject):
+        """
+        Performs a live discovery of comps using RapidAPI, 
+        then enriches them using the official County API.
+        Yields progress updates for the UI.
+        """
+        import subprocess
+        import json
+        import time
+        
+        yield {"status": "searching", "message": f"Searching market sales for {subject['address']}..."}
+        
+        location = "Rhinebeck, NY"
+        beds_min = subject['bedrooms'] - 1
+        beds_max = subject['bedrooms'] + 1
+        
+        try:
+            cmd = ["bash", "tools/fetch_comps.sh", location, str(int(beds_min)), str(int(beds_max))]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            raw_data = json.loads(result.stdout)
+            raw_comps = raw_data.get('data', [])
+            
+            yield {"status": "found", "count": len(raw_comps), "message": f"Found {len(raw_comps)} potential market comps. Starting verification..."}
+            
+            enriched_comps = []
+            for i, rc in enumerate(raw_comps[:10]): # Process up to 10
+                addr_str = rc.get('address', '')
+                if not addr_str: continue
+                
+                yield {"status": "verifying", "address": addr_str, "current": i+1, "total": len(raw_comps[:10]), "message": f"Verifying {addr_str}..."}
+                
+                # 2-second pause between requests as requested
+                time.sleep(2)
+                
+                parts = addr_str.split(' ')
+                num = parts[0]
+                street = parts[1]
+                
+                official_p = None
+                retry_count = 0
+                while retry_count < 2:
+                    official_p = self.search_address(num, street)
+                    
+                    # Detection logic for rate limiting (empty response on a known valid search)
+                    # For this tool, we assume 'None' or empty after we just hit home page might be a block
+                    if official_p:
+                        break
+                    else:
+                        yield {"status": "rate_limited", "message": "Rate limit detected! Pausing for 30 seconds...", "wait": 30}
+                        time.sleep(30)
+                        retry_count += 1
+                        # Re-init session to be safe
+                        self.session = requests.Session()
+                        self.session.get("https://gis.dutchessny.gov/parcelaccess/")
+                
+                if official_p:
+                    official_data = self.get_full_rps_data(official_p['parcelgrid'])
+                    if official_data:
+                        comp_obj = {
+                            'address': official_data['address'],
+                            'sbl': official_data['sbl'],
+                            'sale_price': float(rc.get('price', 0)) if rc.get('price') else 0,
+                            'sale_date': rc.get('last_sold_date', '2025-01-01'),
+                            'sqft': official_data['sqft'],
+                            'acreage': official_data['acreage'],
+                            'bedrooms': official_data['bedrooms'],
+                            'bathrooms': official_data['bathrooms'],
+                            'year_built': official_data['year_built']
+                        }
+                        enriched_comps.append(comp_obj)
+                        yield {"status": "verified", "comp": comp_obj}
+            
+            yield {"status": "complete", "comps": enriched_comps}
+            
+        except Exception as e:
+            yield {"status": "error", "message": f"Discovery Error: {str(e)}"}
+
     def calculate_valuation(self, subject, comps, adjs=None):
         """Performs appraisal math."""
         if adjs is None:
@@ -139,3 +216,52 @@ class TaxGrieveCore:
             
         market_value = sum(r['reconciled_value'] for r in results) / len(results) if results else 0
         return market_value, results
+
+    def ensure_property(self, subject_data):
+        """Saves or updates subject property and returns its DB ID."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO properties 
+            (address, sbl, sqft, acreage, bedrooms, bathrooms, year_built, assessment_2025)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            subject_data['address'], subject_data['sbl'], subject_data['sqft'], subject_data['acreage'],
+            subject_data['bedrooms'], subject_data['bathrooms'], subject_data['year_built'], subject_data['assessment_2025']
+        ))
+        cursor.execute("SELECT id FROM properties WHERE sbl = ?", (subject_data['sbl'],))
+        prop_id = cursor.fetchone()[0]
+        conn.commit()
+        conn.close()
+        return prop_id
+
+    def add_manual_comp(self, property_id, comp_address, sale_price):
+        """Searches, enriches, and saves a manual comp to the database."""
+        # 1. Parse address
+        parts = comp_address.strip().split(' ', 1)
+        if len(parts) < 2: return False
+        
+        num, street = parts
+        official_p = self.search_address(num, street)
+        
+        if not official_p: return False
+        
+        # 2. Enrich
+        official_data = self.get_full_rps_data(official_p['parcelgrid'])
+        if not official_data: return False
+        
+        # 3. Save
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO sales_comps 
+            (address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, target_property_id, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL')
+        """, (
+            official_data['address'], official_data['sbl'], float(sale_price), '2025-01-01',
+            official_data['sqft'], official_data['acreage'], official_data['bedrooms'], official_data['bathrooms'], 
+            official_data['year_built'], property_id
+        ))
+        conn.commit()
+        conn.close()
+        return True

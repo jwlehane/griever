@@ -14,7 +14,8 @@ def discover_sales(session, subject, min_sale_date="01/01/2024"):
     max_sqft = int(subject['sqft'] * 1.20)
     
     # County API expects MM/DD/YYYY
-    max_date = "04/27/2026"
+    from datetime import datetime
+    max_date = datetime.now().strftime("%m/%d/%Y")
     
     params = {
         "swis": subject['sbl'][:6],
