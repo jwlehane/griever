@@ -1,8 +1,0 @@
-{
-  "track_id": "discovery_normalization_20260427",
-  "type": "feature",
-  "status": "new",
-  "created_at": "2026-04-27T10:00:00Z",
-  "updated_at": "2026-04-27T10:00:00Z",
-  "description": "Implement Property Data Discovery and SQLite Normalization"
-}

@@ -63,20 +63,71 @@
         <thead>
             <tr>
                 <th>Comp Address</th>
+                <th>Quality</th>
                 <th>Sale Price</th>
                 <th>Adjusted Value</th>
+                <th>Action</th>
             </tr>
         </thead>
         <tbody>
             {% for comp in comps %}
-            <tr>
-                <td>{{ comp.address }}</td>
+            <tr id="row-{{ comp.zpid or loop.index }}" style="{{ 'background: #fff5f5; color: #c0392b;' if comp.is_outlier else '' }}">
+                <td>
+                    <b>{{ comp.address }}</b>
+                    {% if comp.is_outlier %}<br><small><b>⚠️ OUTLIER</b></small>{% endif %}
+                    <br>
+                    <span class="details-btn" onclick="toggleDetails('details-{{ loop.index }}')" style="color:#3498db; cursor:pointer; font-size:11px; text-decoration:underline;">View Details ▼</span>
+                    <div id="details-{{ loop.index }}" style="display:none; font-size:12px; margin-top:10px; border-top:1px solid #eee; padding-top:10px;">
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px;">
+                            <span><b>Size:</b> {{ "{:,.0f}".format(comp.sqft) }} sqft</span>
+                            <span><b>Year:</b> {{ comp.year_built }}</span>
+                            <span><b>Beds/Baths:</b> {{ comp.bedrooms }}/{{ comp.bathrooms }}</span>
+                            <span><b>2026 Assmt:</b> ${{ "{:,.0f}".format(comp.assessment_2026) if comp.assessment_2026 > 0 else 'N/A' }}</span>
+                            <span><b>2025 Assmt:</b> ${{ "{:,.0f}".format(comp.assessment_2025) if comp.assessment_2025 > 0 else 'N/A' }}</span>
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <div style="width: 100%; background: #eee; height: 10px; border-radius: 5px;">
+                        <div style="width: {{ comp.similarity_score }}%; background: {{ '#27ae60' if comp.similarity_score > 70 else '#f1c40f' }}; height: 100%; border-radius: 5px;"></div>
+                    </div>
+                    <small>{{ comp.similarity_score }}% match</small>
+                </td>
                 <td>${{ "{:,.0f}".format(comp.sale_price) }}</td>
                 <td><strong>${{ "{:,.0f}".format(comp.reconciled_value) }}</strong></td>
+                <td>
+                    <button onclick="rejectComp('{{ comp.address }}', '{{ comp.zpid or '' }}', 'row-{{ comp.zpid or loop.index }}')" style="background: #e74c3c; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;">Reject</button>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+
+    <script>
+        function toggleDetails(id) {
+            const el = document.getElementById(id);
+            if (el.style.display === 'block') el.style.display = 'none';
+            else el.style.display = 'block';
+        }
+
+        function rejectComp(address, zpid, rowId) {
+            if (confirm("Are you sure you want to remove " + address + " from this report?")) {
+                const formData = new FormData();
+                formData.append('property_id', '{{ subject_id }}');
+                formData.append('address', address);
+                if (zpid) formData.append('zpid', zpid);
+
+                fetch('/reject_comp', { method: 'POST', body: formData })
+                    .then(() => {
+                        const row = document.getElementById(rowId);
+                        row.style.opacity = '0.3';
+                        row.style.textDecoration = 'line-through';
+                        row.querySelector('button').disabled = true;
+                        row.querySelector('button').innerText = 'Rejected';
+                    });
+            }
+        }
+    </script>
 
     <h2>Suggestion Engine</h2>
     <div style="background: #e3f2fd; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
@@ -108,6 +159,19 @@
         I respectfully request that the assessment be reduced to ${{ "{:,.0f}".format(market_value) }} to align with fair market value.
     </div>
     {% endif %}
+
+    <div style="margin-top: 30px; background: #e8f5e9; padding: 20px; border-radius: 4px; border: 1px solid #c8e6c9;">
+        <h3 style="margin-top:0;">🛠️ Refine with Renovation</h3>
+        <p style="font-size: 14px;">If this property has undergone a significant renovation, we can calculate an <strong>Effective Age</strong> to ensure a fair valuation.</p>
+        <form action="/report" method="post" style="display: flex; gap: 10px; align-items: center;">
+            <input type="hidden" name="address" value="{{ subject.address }}">
+            <input type="hidden" name="subject_id" value="{{ subject_id }}">
+            <input type="hidden" name="skip_discovery" value="true">
+            <label for="renovation_year" style="font-size: 14px;">Year of Major Renovation:</label>
+            <input type="number" id="renovation_year" name="renovation_year" value="{{ renovation_year or '' }}" placeholder="YYYY" style="width: 80px; padding: 10px;" min="1900" max="2026">
+            <button type="submit" style="padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer;">Update Valuation</button>
+        </form>
+    </div>
 
     <div style="margin-top: 50px; background: #f8f9fa; padding: 20px; border-radius: 4px; border: 1px solid #ddd;">
         <h3 style="margin-top:0;">➕ Add Another Comp</h3>

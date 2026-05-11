@@ -14,28 +14,113 @@
         button { width: 100%; padding: 15px; background: #27ae60; color: white; border: none; border-radius: 4px; font-size: 18px; cursor: pointer; transition: background 0.3s; }
         button:hover { background: #219150; }
         button:disabled { background: #bdc3c7; cursor: not-allowed; }
-        #log { margin-top: 30px; background: #2c3e50; color: #ecf0f1; padding: 20px; border-radius: 4px; font-family: monospace; font-size: 13px; height: 200px; overflow-y: auto; display: none; }
-        .progress-box { margin-top: 20px; display: none; }
+        #log { margin-top: 20px; background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; font-family: monospace; font-size: 12px; height: 120px; overflow-y: auto; display: none; }
+        
+        /* New Styles for Cards and Verification */
+        #verification-step { margin-top: 30px; display: none; }
+        .card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+        .card-title { font-size: 18px; font-weight: bold; color: #2c3e50; margin: 0; }
+        .card-details { display: none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
+        .spec-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 14px; }
+        .spec-item b { color: #7f8c8d; font-size: 11px; text-transform: uppercase; display: block; }
+        
+        #live-table-container { margin-top: 30px; display: none; }
+        #rejected-container { margin-top: 40px; display: none; opacity: 0.6; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; background: white; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; color: #7f8c8d; text-transform: uppercase; font-size: 11px; }
+        
+        .comp-row:hover { background: #fdfdfd; }
+        .details-btn { color: #3498db; cursor: pointer; font-size: 12px; text-decoration: underline; }
+        .rejected-row td { text-decoration: line-through; }
+        
+        .status-pill { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; }
+        .status-verified { background: #e8f5e9; color: #2e7d32; }
+        .status-unverified { background: #fff3e0; color: #ef6c00; }
+        
+        .action-btns { display: flex; gap: 20px; margin-top: 20px; }
+        .btn-confirm { background: #27ae60; flex: 2; }
+        .btn-cancel { background: #95a5a6; flex: 1; }
+        .btn-report { background: #2c3e50; flex: 1; display: none; }
+        .controls { display: flex; gap: 10px; margin-top: 20px; }
         .timer { font-weight: bold; color: #e67e22; }
         .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #bdc3c7; }
     </style>
 </head>
 <body>
     <div id="main-container" class="container">
-        <h1>TaxGrieve Rhinebeck</h1>
-        <p>Enter your address to generate a professional property tax grievance report.</p>
+        <h1>TaxGrieve NY</h1>
+        <p>Phase 1: Verify your property details.</p>
         
-        <div class="form-box">
-            <input type="text" id="address" placeholder="e.g. 67 N Parsonage St" required>
-            <button id="submit-btn" onclick="startAnalysis()">Analyze Property</button>
+        <div id="search-box" class="form-box">
+            <input type="text" id="address" placeholder="e.g. 67 N Parsonage St, Rhinebeck" required>
+            <button id="search-btn" onclick="searchProperty()">Find My Property</button>
+        </div>
+
+        <!-- Step 2: Verification Card -->
+        <div id="verification-step">
+            <div class="card">
+                <div class="card-header" onclick="toggleDetails('subject-details')">
+                    <h3 class="card-title" id="subject-addr-display">Property Found</h3>
+                    <span class="details-btn">View Specs ▼</span>
+                </div>
+                <div id="subject-details" class="card-details">
+                    <div class="spec-grid">
+                        <div class="spec-item"><b>Bedrooms</b> <span id="s-beds"></span></div>
+                        <div class="spec-item"><b>Bathrooms</b> <span id="s-baths"></span></div>
+                        <div class="spec-item"><b>Living Area</b> <span id="s-sqft"></span> sqft</div>
+                        <div class="spec-item"><b>Year Built</b> <span id="s-year"></span></div>
+                        <div class="spec-item"><b>Acreage</b> <span id="s-acre"></span></div>
+                        <div class="spec-item"><b>Town/Village</b> <span id="s-town"></span></div>
+                        <div class="spec-item"><b>Current (2026) Roll</b> <span id="s-ass-26"></span></div>
+                        <div class="spec-item"><b>Last Year (2025) Roll</b> <span id="s-ass-25"></span></div>
+                    </div>
+                </div>
+            </div>
+            <p style="font-size:14px; color:#e67e22; font-weight:bold;">Is this the correct property?</p>
+            <div class="action-btns">
+                <button class="btn-confirm" onclick="startDiscovery()">Yes, Start Search</button>
+                <button class="btn-cancel" onclick="resetSearch()">No, Search Again</button>
+            </div>
         </div>
 
         <div id="progress" class="progress-box">
-            <div id="status-msg" style="margin-bottom: 10px; font-weight: bold;">Initializing...</div>
-            <div id="timer-msg" class="timer"></div>
+            <div id="status-msg" style="margin-bottom: 10px; font-weight: bold;">Preparing discovery...</div>
+            <div class="controls">
+                <button id="stop-btn" class="btn-stop" onclick="stopAnalysis()">Stop Discovery</button>
+                <button id="resume-btn" class="btn-resume" onclick="startDiscovery()">Resume Discovery</button>
+                <button id="report-btn" class="btn-report" onclick="startDiscovery(true)">View Final Report</button>
+            </div>
+        </div>
+
+        <div id="live-table-container">
+            <h3 style="margin-bottom:5px; color:#2c3e50;">Active Sales</h3>
+            <table id="live-table">
+                <thead>
+                    <tr>
+                        <th>Address</th>
+                        <th>Price</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="live-table-body">
+                </tbody>
+            </table>
+        </div>
+
+        <div id="rejected-container">
+            <h3 style="margin-bottom:5px; color:#c0392b;">Excluded Sales</h3>
+            <table id="rejected-table">
+                <tbody id="rejected-table-body">
+                </tbody>
+            </table>
         </div>
 
         <div id="log"></div>
+
+        <div id="manual-entry"></div>
 
         <div class="footer">
             Built for Rhinebeck Homeowners. Data sourced from Dutchess County ParcelAccess & RapidAPI.
@@ -43,23 +128,110 @@
     </div>
 
     <script>
-        let eventSource;
+        let controller;
+        let currentSubject;
+        let currentSubjectId;
 
-        function startAnalysis() {
+        function toggleDetails(id) {
+            const el = document.getElementById(id);
+            const btn = el.previousElementSibling.querySelector('.details-btn');
+            if (el.style.display === 'block') {
+                el.style.display = 'none';
+                btn.innerText = 'View Specs ▼';
+            } else {
+                el.style.display = 'block';
+                btn.innerText = 'Hide Specs ▲';
+            }
+        }
+
+        function searchProperty() {
             const addr = document.getElementById('address').value;
             if (!addr) return alert("Please enter an address");
-
-            document.getElementById('submit-btn').disabled = true;
-            document.getElementById('log').style.display = 'block';
-            document.getElementById('log').innerHTML = '> Initializing analysis connection...\n';
-            document.getElementById('progress').style.display = 'block';
+            
+            const btn = document.getElementById('search-btn');
+            const log = document.getElementById('log');
+            btn.disabled = true;
+            btn.innerText = "Searching County Records...";
+            log.style.display = 'block';
+            log.innerHTML = `> Initializing search for "${addr}"...\n`;
 
             const formData = new FormData();
             formData.append('address', addr);
 
+            fetch('/search_property', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        currentSubject = data.subject;
+                        currentSubjectId = data.subject_id;
+                        
+                        // Fill Card
+                        document.getElementById('subject-addr-display').innerText = currentSubject.address;
+                        document.getElementById('s-beds').innerText = currentSubject.bedrooms;
+                        document.getElementById('s-baths').innerText = currentSubject.bathrooms;
+                        document.getElementById('s-sqft').innerText = currentSubject.sqft.toLocaleString();
+                        document.getElementById('s-year').innerText = currentSubject.year_built;
+                        document.getElementById('s-acre').innerText = currentSubject.acreage;
+                        document.getElementById('s-town').innerText = currentSubject.town;
+                        document.getElementById('s-ass-25').innerText = '$' + currentSubject.assessment_2025.toLocaleString();
+                        document.getElementById('s-ass-26').innerText = '$' + (currentSubject.assessment_2026 || 0).toLocaleString();
+                        
+                        document.getElementById('search-box').style.display = 'none';
+                        document.getElementById('verification-step').style.display = 'block';
+                        log.innerHTML += `> Property confirmed: ${currentSubject.address}\n`;
+                    } else {
+                        log.innerHTML += `<span style="color: #e74c3c;">> ${data.message}</span>\n`;
+                        log.innerHTML += `> TIP: Try adding the town name (e.g., "15 Seymour, Rhinebeck") or check your spelling.\n`;
+                        btn.disabled = false;
+                        btn.innerText = "Find My Property";
+                    }
+                });
+        }
+
+        function resetSearch() {
+            document.getElementById('search-box').style.display = 'block';
+            document.getElementById('verification-step').style.display = 'none';
+            document.getElementById('search-btn').disabled = false;
+            document.getElementById('search-btn').innerText = "Find My Property";
+        }
+
+        function stopAnalysis() {
+            if (controller) {
+                controller.abort();
+                document.getElementById('status-msg').innerHTML = "Discovery Paused";
+                document.getElementById('stop-btn').style.display = 'none';
+                document.getElementById('resume-btn').style.display = 'block';
+                document.getElementById('report-btn').style.display = 'block';
+            }
+        }
+
+        function startDiscovery(skipDiscovery = false) {
+            document.getElementById('verification-step').style.display = 'none';
+            document.getElementById('progress').style.display = 'block';
+            document.getElementById('live-table-container').style.display = 'block';
+            document.getElementById('log').style.display = 'block';
+            
+            if (skipDiscovery) {
+                document.getElementById('status-msg').innerHTML = "Finalizing Report...";
+                document.getElementById('stop-btn').style.display = 'none';
+                document.getElementById('resume-btn').style.display = 'none';
+                document.getElementById('report-btn').style.display = 'none';
+            } else {
+                document.getElementById('stop-btn').style.display = 'block';
+                document.getElementById('resume-btn').style.display = 'none';
+                document.getElementById('report-btn').style.display = 'none';
+            }
+
+            controller = new AbortController();
+            const formData = new FormData();
+            formData.append('address', currentSubject.address);
+            formData.append('subject_id', currentSubjectId);
+            if (skipDiscovery) formData.append('skip_discovery', 'true');
+
             fetch('/report', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: controller.signal
             }).then(response => {
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -77,6 +249,9 @@
                             }
                         });
                         read();
+                    }).catch(err => {
+                        if (err.name === 'AbortError') console.log('Fetch aborted');
+                        else console.error('Fetch error:', err);
                     });
                 }
                 read();
@@ -86,70 +261,100 @@
         function handleUpdate(data) {
             const log = document.getElementById('log');
             const status = document.getElementById('status-msg');
-            const timer = document.getElementById('timer-msg');
+            const tableBody = document.getElementById('live-table-body');
 
-            if (data.status === 'error') {
+            if (data.status === 'info' || data.status === 'searching') {
+                if (data.subject_id) currentSubjectId = data.subject_id;
+                let msg = data.message || data.status;
+                if (msg.startsWith('MATCH:')) {
+                    log.innerHTML += `<span style="color: #2ecc71; font-weight: bold;">> ${msg}</span>\n`;
+                } else {
+                    log.innerHTML += `> ${msg}\n`;
+                }
+            } else if (data.status === 'verifying') {
+                log.innerHTML += `> Checking ${data.address} (${data.current}/${data.total})...\n`;
+                status.innerHTML = `Verifying ${data.current}/${data.total}...`;
+            } else if (data.status === 'resuming') {
+                log.innerHTML += `> Resumed: ${data.message || data.address}\n`;
+            } else if (data.status === 'error') {
                 status.innerHTML = "❌ Error Occurred";
-                status.style.color = "#c0392b";
                 log.innerHTML += `<span style="color: #e74c3c;">ERROR: ${data.message}</span>\n`;
-                document.getElementById('submit-btn').disabled = false;
+            } else if (data.status === 'verified') {
+                const comp = data.comp;
+                const rowId = `comp-${comp.zpid || comp.address.replace(/\s+/g, '-')}`;
+                if (!document.getElementById(rowId)) {
+                    const row = document.createElement('tr');
+                    row.id = rowId;
+                    row.className = 'comp-row';
+                    const statusClass = comp.status === 'VERIFIED' ? 'status-verified' : 'status-unverified';
+                    
+                    const detailsId = `details-${rowId}`;
+                    const ass26 = comp.assessment_2026 ? `$${comp.assessment_2026.toLocaleString()}` : 'N/A';
+                    const ass25 = comp.assessment_2025 ? `$${comp.assessment_2025.toLocaleString()}` : 'N/A';
+
+                    row.innerHTML = `
+                        <td>
+                            <b>${comp.address}</b><br>
+                            <span class="details-btn" onclick="toggleDetails('${detailsId}')">View Details ▼</span>
+                            <div id="${detailsId}" class="card-details">
+                                <div class="spec-grid">
+                                    <div class="spec-item"><b>Beds/Baths</b> ${comp.bedrooms}/${comp.bathrooms}</div>
+                                    <div class="spec-item"><b>Size</b> ${comp.sqft} sqft</div>
+                                    <div class="spec-item"><b>Year</b> ${comp.year_built}</div>
+                                    <div class="spec-item"><b>Acreage</b> ${comp.acreage}</div>
+                                    <div class="spec-item"><b>2026 Assmt</b> ${ass26}</div>
+                                    <div class="spec-item"><b>2025 Assmt</b> ${ass25}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>$${comp.sale_price.toLocaleString()}</td>
+                        <td><span class="status-pill ${statusClass}">${comp.status}</span></td>
+                        <td><button onclick="rejectComp('${comp.address}', '${comp.zpid || ''}', '${rowId}')" style="font-size:11px; background:#eee; color:#333;">Reject</button></td>
+                    `;
+                    tableBody.prepend(row);
+                }
+                status.innerHTML = `Discovered ${tableBody.children.length} comps...`;
             } else if (data.status === 'no_comps') {
                 status.innerHTML = "No Comps Found Automatically";
-                log.innerHTML += `> Discovery complete, but no matches found.\n`;
-                document.getElementById('submit-btn').disabled = false;
-                
-                // Show Manual Entry Form
-                document.getElementById('log').innerHTML = `
-                    <div style="background: white; color: #333; padding: 20px; border-radius: 4px; border: 1px solid #ddd; margin-top:10px;">
-                        <h3 style="margin-top:0;">🔍 How to Find Comps Manually</h3>
-                        <ol style="font-size:14px; line-height:1.5;">
-                            <li>Visit <b>Dutchess County ParcelAccess</b>.</li>
-                            <li>Search for your address.</li>
-                            <li>In the sidebar, click <b>"Search Tools"</b> > <b>"Sales Search"</b>.</li>
-                            <li>Set "Sqft Range" to <b>+/- 20%</b> of your home.</li>
-                            <li>Identify 3-5 sales and note their <b>Address</b> and <b>Price</b>.</li>
-                        </ol>
-                        <hr>
-                        <form action="/add_comp" method="post">
-                            <input type="hidden" name="property_id" value="${data.subject_id}">
-                            <p><b>Add a Manual Comp:</b></p>
-                            <input type="text" name="address" placeholder="Comp Address" style="width:100%; margin-bottom:10px;" required>
-                            <input type="number" name="price" placeholder="Sale Price ($)" style="width:100%; margin-bottom:10px;" required>
-                            <button type="submit" style="font-size:14px; background:#34495e;">Add to Record</button>
-                        </form>
-                    </div>
-                `;
+                showManualForm(data.subject_id);
             } else if (data.status === 'finished') {
                 document.body.innerHTML = data.html;
-            } else if (data.status === 'rate_limited') {
-                status.innerHTML = "⚠️ Rate Limit Detected";
-                startTimer(data.wait, "Resuming in ");
-                log.innerHTML += `> ${data.message}\n`;
-            } else if (data.status === 'verifying') {
-                status.innerHTML = `Verifying Comp ${data.current}/${data.total}`;
-                startTimer(2, "Next request in ");
-                log.innerHTML += `> ${data.message}\n`;
-            } else {
-                status.innerHTML = data.status.toUpperCase();
-                log.innerHTML += `> ${data.message || data.status}\n`;
             }
             log.scrollTop = log.scrollHeight;
         }
 
-        let currentTimer;
-        function startTimer(seconds, prefix) {
-            if (currentTimer) clearInterval(currentTimer);
-            const timerDisplay = document.getElementById('timer-msg');
-            let remaining = seconds;
-            
-            currentTimer = setInterval(() => {
-                timerDisplay.innerHTML = `${prefix} ${remaining}s...`;
-                remaining--;
-                if (remaining < 0) {
-                    clearInterval(currentTimer);
-                    timerDisplay.innerHTML = "";
-                }
-            }, 1000);
+        function rejectComp(address, zpid, rowId) {
+            const formData = new FormData();
+            formData.append('property_id', currentSubjectId);
+            formData.append('address', address);
+            if (zpid) formData.append('zpid', zpid);
+
+            fetch('/reject_comp', { method: 'POST', body: formData })
+                .then(() => {
+                    const row = document.getElementById(rowId);
+                    document.getElementById('rejected-container').style.display = 'block';
+                    const rejectedBody = document.getElementById('rejected-table-body');
+                    
+                    const newRow = row.cloneNode(true);
+                    newRow.classList.add('rejected-row');
+                    newRow.querySelector('button').remove();
+                    rejectedBody.appendChild(newRow);
+                    row.remove();
+                });
+        }
+
+        function showManualForm(subjectId) {
+            document.getElementById('manual-entry').innerHTML = `
+                <div class="card" style="margin-top:20px;">
+                    <h3>🔍 Add Manual Comp</h3>
+                    <form action="/add_comp" method="post" style="text-align:left;">
+                        <input type="hidden" name="property_id" value="${subjectId}">
+                        <input type="text" name="address" placeholder="Comp Address" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:4px;" required>
+                        <input type="number" name="price" placeholder="Sale Price ($)" style="width:100%; padding:10px; margin-bottom:15px; border:1px solid #ddd; border-radius:4px;" required>
+                        <button type="submit">Add to Report</button>
+                    </form>
+                </div>
+            `;
         }
     </script>
 </body>
