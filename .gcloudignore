@@ -1,0 +1,8 @@
+.git
+tax-grieve-env
+__pycache__
+*.pyc
+.pytest_cache
+*.db
+*.pdf
+node_modules

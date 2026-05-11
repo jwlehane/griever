@@ -52,17 +52,18 @@ class TaxGrieveCore:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Ensure schema has assessment columns
+        # 1. ALWAYS ensure table exists first
+        cursor.execute('''CREATE TABLE IF NOT EXISTS properties 
+                        (id INTEGER PRIMARY KEY, address TEXT, sbl TEXT, sqft REAL, acreage REAL, 
+                         bedrooms REAL, bathrooms REAL, year_built INTEGER, assessment_2025 REAL, assessment_2026 REAL)''')
+
+        # 2. Then check for schema evolution (migration)
         cursor.execute("PRAGMA table_info(properties)")
         cols = [c[1] for c in cursor.fetchall()]
         if 'assessment_2025' not in cols:
             cursor.execute("ALTER TABLE properties ADD COLUMN assessment_2025 REAL")
         if 'assessment_2026' not in cols:
             cursor.execute("ALTER TABLE properties ADD COLUMN assessment_2026 REAL")
-
-        cursor.execute('''CREATE TABLE IF NOT EXISTS properties 
-                        (id INTEGER PRIMARY KEY, address TEXT, sbl TEXT, sqft REAL, acreage REAL, 
-                         bedrooms REAL, bathrooms REAL, year_built INTEGER, assessment_2025 REAL, assessment_2026 REAL)''')
         
         cursor.execute("SELECT id FROM properties WHERE sbl = ?", (subject_data['sbl'],))
         row = cursor.fetchone()

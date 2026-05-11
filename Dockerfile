@@ -1,16 +1,19 @@
 FROM python:3.11-slim
-
 WORKDIR /app
 
+# Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy source code and database
 COPY . .
 
-# Ensure the database is present
-# In a real cloud env, we'd use Cloud SQL, but for now we copy the seed DB
-COPY grievance_data.db .
+# Ensure the database is accessible in the working directory
+# The app looks for 'grievance_data.db' in the CWD.
+# We stay in /app so it finds /app/grievance_data.db
 
-EXPOSE 8080
+# Ensure PYTHONPATH includes src so 'from app.core' works from src/main.py
+ENV PYTHONPATH=/app/src
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Run from root, targeting src.main
+CMD uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8080}
