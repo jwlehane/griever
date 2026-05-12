@@ -1,6 +1,5 @@
 import sys
 import os
-import pytest
 
 # Add src to path so we can import app.core
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -31,7 +30,9 @@ def test_valuation_math_basic():
         'year_built': 2000
     }]
     
-    market_value, results = core.calculate_valuation(subject, comps)
+    valuation = core.calculate_valuation(subject, comps)
+    market_value = valuation['market_value']
+    results = valuation['comps']
     
     assert market_value == 500000
     assert results[0]['reconciled_value'] == 500000
@@ -61,7 +62,9 @@ def test_valuation_adjustments():
     
     # $150 per sqft adjustment (default)
     # (2500 - 2000) * 150 = 500 * 150 = 75,000
-    market_value, results = core.calculate_valuation(subject, comps)
+    valuation = core.calculate_valuation(subject, comps)
+    market_value = valuation['market_value']
+    results = valuation['comps']
     
     assert market_value == 575000
     assert results[0]['adjustments']['gla'] == 75000

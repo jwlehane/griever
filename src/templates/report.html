@@ -17,6 +17,22 @@
         .stat-box h4 { margin: 0; color: #7f8c8d; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
         .stat-box p { margin: 6px 0 0; font-size: 22px; font-weight: 700; line-height: 1.1; }
         .stat-box small { color: #95a5a6; font-size: 11px; display: block; margin-top: 4px; }
+        .quality-panel { border: 1px solid #dce3e8; background: #fafbfc; padding: 16px; border-radius: 4px; margin-bottom: 20px; }
+        .quality-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
+        .quality-title { margin: 0; font-size: 16px; color: #1a252f; }
+        .quality-score { font-size: 30px; font-weight: 700; line-height: 1; text-align: right; }
+        .quality-score small { display: block; font-size: 12px; color: #7f8c8d; margin-top: 4px; }
+        .quality-meter { height: 8px; background: #e5eaee; border-radius: 4px; overflow: hidden; margin: 8px 0 14px; }
+        .quality-fill { height: 100%; border-radius: 4px; }
+        .quality-fill.high { background: #27ae60; }
+        .quality-fill.moderate { background: #3498db; }
+        .quality-fill.low { background: #f39c12; }
+        .quality-fill.weak { background: #c0392b; }
+        .quality-components { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+        .quality-component { border-top: 1px solid #e3e8ec; padding-top: 8px; font-size: 12px; }
+        .quality-component strong { display: flex; justify-content: space-between; gap: 8px; color: #2c3e50; }
+        .quality-component span { color: #7f8c8d; display: block; margin-top: 3px; }
+        .quality-warnings { margin: 12px 0 0; padding-left: 18px; font-size: 12px; color: #7c4a00; }
         table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
         th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #ecf0f1; vertical-align: top; }
         th { background: #f2f4f7; color: #7f8c8d; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -98,6 +114,40 @@
             <p>${{ "{:,.0f}".format(reduction or 0) }}</p>
             <small>Reduce roll AV from ${{ "{:,.0f}".format(current_av or 0) }} to ${{ "{:,.0f}".format((current_av or 0) - (reduction or 0)) }}</small>
         </div>
+    </div>
+
+    {% set quality = evidence_quality or {} %}
+    <div class="quality-panel">
+        <div class="quality-header">
+            <div>
+                <h2 class="quality-title" style="border-bottom: none; padding-bottom: 0; margin-top: 0;">Evidence Quality</h2>
+                <div style="font-size: 13px; color: #7f8c8d;">
+                    Based on comp verification, missing fields, sale freshness, outliers, and source quality.
+                </div>
+            </div>
+            <div class="quality-score">
+                {{ quality.score or 0 }}%
+                <small>{{ quality.label or 'Weak' }} confidence</small>
+            </div>
+        </div>
+        <div class="quality-meter">
+            <div class="quality-fill {{ quality.class or 'weak' }}" style="width: {{ quality.score or 0 }}%;"></div>
+        </div>
+        <div class="quality-components">
+            {% for component in quality.components or [] %}
+            <div class="quality-component">
+                <strong>{{ component.label }} <em>{{ component.score }}%</em></strong>
+                <span>{{ component.summary }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% if quality.warnings %}
+        <ul class="quality-warnings">
+            {% for warning in quality.warnings %}
+            <li>{{ warning }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
     </div>
 
     <details>

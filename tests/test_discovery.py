@@ -1,6 +1,5 @@
 import sys
 import os
-import pytest
 
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -41,14 +40,18 @@ def test_outlier_detection():
     comps = [
         {'address': 'Good 1', 'sale_price': 500000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3},
         {'address': 'Good 2', 'sale_price': 510000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3},
-        {'address': 'Outlier', 'sale_price': 800000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3}
+        {'address': 'Good 3', 'sale_price': 505000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3},
+        {'address': 'Good 4', 'sale_price': 515000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3},
+        {'address': 'Outlier', 'sale_price': 1000000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3}
     ]
     
-    market_value, results = core.calculate_valuation(subject, comps)
+    valuation = core.calculate_valuation(subject, comps)
+    market_value = valuation['market_value']
+    results = valuation['comps']
     
     # Outlier should be flagged
     outlier_result = next(r for r in results if r['address'] == 'Outlier')
     assert outlier_result['is_outlier'] == True
     
     # Market value should be based on valid comps only
-    assert market_value == 505000
+    assert market_value == 507500

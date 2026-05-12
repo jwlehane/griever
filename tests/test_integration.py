@@ -1,6 +1,5 @@
 import sys
 import os
-import pytest
 import sqlite3
 from unittest.mock import patch, MagicMock
 
@@ -22,7 +21,7 @@ def setup_test_db(db_path):
             bedrooms INTEGER,
             bathrooms REAL,
             acreage REAL,
-            assessed_value_2026 REAL,
+            assessment_2026 REAL,
             property_class TEXT,
             year_built INTEGER,
             assessment_2025 REAL
@@ -43,6 +42,8 @@ def setup_test_db(db_path):
             reconciled_value REAL,
             year_built INTEGER,
             target_property_id INTEGER,
+            status TEXT DEFAULT 'VERIFIED',
+            assessment_2026 REAL,
             source TEXT DEFAULT 'MANUAL',
             similarity_score REAL DEFAULT 0,
             is_outlier INTEGER DEFAULT 0
@@ -103,7 +104,9 @@ def test_full_pipeline_flow():
     comps = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    market_value, results = core.calculate_valuation(subject_data, comps)
+    valuation = core.calculate_valuation(subject_data, comps)
+    market_value = valuation['market_value']
+    results = valuation['comps']
     
     assert market_value > 800000
     assert len(results) == 1

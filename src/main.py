@@ -263,6 +263,7 @@ async def generate_report(
             adjustments_used = valuation["adjustments_used"]
             used_count = valuation["used_count"]
             considered_count = valuation["considered_count"]
+            evidence_quality = valuation["evidence_quality"]
 
             # Equalization-rate aware comparison
             from app.equalization import get_rate as _er_rate, implied_market_value
@@ -302,6 +303,7 @@ async def generate_report(
                 "used_count": used_count,
                 "considered_count": considered_count,
                 "adjustments_used": adjustments_used,
+                "evidence_quality": evidence_quality,
                 "condition": init_condition,
             })
             
@@ -400,6 +402,7 @@ def _build_report_context(subject_id: int, renovation_year: int = None, conditio
         "used_count": valuation["used_count"],
         "considered_count": valuation["considered_count"],
         "adjustments_used": valuation["adjustments_used"],
+        "evidence_quality": valuation["evidence_quality"],
         "current_av": current_av,
         "equalization_rate": er,
         "implied_market_value": implied_mv,

@@ -5,9 +5,11 @@ import subprocess
 import json
 import re
 import math
+from datetime import date, datetime
 from app.counties.factory import CountyFactory
 from app.exceptions import CountyAPIError
 from app.equalization import get_rate as _er_rate, implied_market_value
+
 
 class TaxGrieveCore:
     def __init__(self, db_path='grievance_data.db'):
@@ -530,6 +532,204 @@ class TaxGrieveCore:
         score = sum(n * w for n, w in avail) / total_w * 100
         return round(score, 1)
 
+    def calculate_evidence_quality(self, subject, comps, today=None):
+        """Return a report-level evidence confidence score with audit details.
+
+        The score is intentionally transparent: every component exposes its
+        own score and summary so the report can explain where confidence was
+        lost.
+        """
+        today = today or date.today()
+        if isinstance(today, datetime):
+            today = today.date()
+
+        candidates = [c for c in comps if c.get('status') != 'REJECTED']
+        used = [c for c in candidates if c.get('used')]
+        relevant = used or candidates
+        used_count = len(used)
+        considered_count = len(candidates)
+
+        def _is_present(obj, key):
+            value = obj.get(key)
+            if value is None or value == "":
+                return False
+            if isinstance(value, (int, float)) and value == 0:
+                return False
+            return True
+
+        def _status(obj):
+            return (obj.get('status') or 'UNVERIFIED').upper()
+
+        def _is_verified(obj):
+            return _status(obj) in {'VERIFIED', 'MANUAL'}
+
+        def _parse_sale_date(value):
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date):
+                return value
+            if not value:
+                return None
+            text = str(value).strip()
+            for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"):
+                try:
+                    return datetime.strptime(text[:10], fmt).date()
+                except ValueError:
+                    continue
+            return None
+
+        if relevant:
+            verified_count = sum(1 for c in relevant if _is_verified(c))
+            verified_ratio = verified_count / len(relevant)
+            count_score = min(1.0, len(relevant) / 3) * 100
+            verified_score = round((verified_ratio * 80) + (count_score * 0.20))
+        else:
+            verified_count = 0
+            verified_score = 0
+
+        subject_fields = ['sbl', 'sqft', 'acreage', 'bedrooms', 'bathrooms', 'year_built']
+        comp_fields = ['sale_price', 'sale_date', 'sqft', 'acreage', 'bedrooms', 'bathrooms', 'year_built']
+        subject_present = sum(1 for f in subject_fields if _is_present(subject, f))
+        subject_score = subject_present / len(subject_fields) * 100
+        if relevant:
+            present = 0
+            total = 0
+            missing_counts = {field: 0 for field in comp_fields}
+            for comp in relevant:
+                for field in comp_fields:
+                    total += 1
+                    if _is_present(comp, field):
+                        present += 1
+                    else:
+                        missing_counts[field] += 1
+            comp_completeness = present / total * 100 if total else 0
+        else:
+            missing_counts = {field: 0 for field in comp_fields}
+            comp_completeness = 0
+        completeness_score = round((subject_score * 0.25) + (comp_completeness * 0.75))
+
+        freshness_points = []
+        stale_count = 0
+        missing_date_count = 0
+        for comp in relevant:
+            parsed = _parse_sale_date(comp.get('sale_date'))
+            if not parsed:
+                freshness_points.append(25)
+                missing_date_count += 1
+                continue
+            age_days = max(0, (today - parsed).days)
+            if age_days <= 365:
+                freshness_points.append(100)
+            elif age_days <= 730:
+                freshness_points.append(80)
+            elif age_days <= 1095:
+                freshness_points.append(45)
+                stale_count += 1
+            else:
+                freshness_points.append(15)
+                stale_count += 1
+        freshness_score = round(sum(freshness_points) / len(freshness_points)) if freshness_points else 0
+
+        outlier_count = sum(1 for c in candidates if c.get('is_outlier'))
+        used_outliers = sum(1 for c in relevant if c.get('is_outlier'))
+        outlier_ratio = (outlier_count / considered_count) if considered_count else 0
+        used_outlier_ratio = (used_outliers / len(relevant)) if relevant else 0
+        outlier_score = round(max(0, 100 - (outlier_ratio * 60) - (used_outlier_ratio * 50)))
+
+        source_points = []
+        for comp in relevant:
+            status = _status(comp)
+            if status == 'VERIFIED':
+                source_points.append(100)
+            elif status == 'MANUAL':
+                source_points.append(95)
+            elif status == 'UNVERIFIED':
+                source_points.append(55)
+            else:
+                source_points.append(70)
+        if source_points:
+            comp_source_score = sum(source_points) / len(source_points)
+        else:
+            comp_source_score = 0
+        subject_source_score = 100 if subject.get('sbl') and (subject.get('assessment_2026') or subject.get('assessment_2025')) else 70
+        source_score = round((comp_source_score * 0.8) + (subject_source_score * 0.2))
+
+        components = [
+            {
+                "key": "verified_comps",
+                "label": "Verified comps",
+                "score": verified_score,
+                "weight": 30,
+                "summary": f"{verified_count} of {len(relevant)} valuation comps are county-verified or manually verified.",
+            },
+            {
+                "key": "field_completeness",
+                "label": "Field completeness",
+                "score": completeness_score,
+                "weight": 25,
+                "summary": f"Subject data is {round(subject_score)}% complete; valuation comp fields are {round(comp_completeness)}% complete.",
+            },
+            {
+                "key": "sale_freshness",
+                "label": "Sale freshness",
+                "score": freshness_score,
+                "weight": 20,
+                "summary": f"{stale_count} stale and {missing_date_count} undated valuation comps.",
+            },
+            {
+                "key": "outlier_pressure",
+                "label": "Outlier pressure",
+                "score": outlier_score,
+                "weight": 15,
+                "summary": f"{outlier_count} of {considered_count} candidate comps are outliers; {used_outliers} affect the valuation set.",
+            },
+            {
+                "key": "source_quality",
+                "label": "Source quality",
+                "score": source_score,
+                "weight": 10,
+                "summary": "County records rank highest; unverified market-source-only comps reduce confidence.",
+            },
+        ]
+        score = round(sum(c["score"] * (c["weight"] / 100) for c in components))
+        score = max(0, min(100, score))
+        if score >= 85:
+            label = "High"
+            css_class = "high"
+        elif score >= 70:
+            label = "Moderate"
+            css_class = "moderate"
+        elif score >= 50:
+            label = "Low"
+            css_class = "low"
+        else:
+            label = "Weak"
+            css_class = "weak"
+
+        warnings = []
+        if len(relevant) < 3:
+            warnings.append("Fewer than three valuation comps are available.")
+        unverified_used = len([c for c in relevant if not _is_verified(c)])
+        if unverified_used:
+            warnings.append(f"{unverified_used} valuation comps are not county-verified.")
+        missing_years = missing_counts.get('year_built', 0)
+        if missing_years:
+            warnings.append(f"{missing_years} valuation comps are missing year-built data.")
+        if stale_count:
+            warnings.append(f"{stale_count} valuation comps are more than 24 months old.")
+        if used_outliers:
+            warnings.append(f"{used_outliers} valuation comps are flagged as outliers.")
+
+        return {
+            "score": score,
+            "label": label,
+            "class": css_class,
+            "components": components,
+            "warnings": warnings,
+            "used_count": used_count,
+            "considered_count": considered_count,
+        }
+
     def calculate_valuation(self, subject, comps, adjs=None, renovation_year=None,
                             best_n: int = 5, condition_factor: float = 1.0):
         """Sales-comparison valuation with median+IQR outlier filter and a
@@ -558,6 +758,7 @@ class TaxGrieveCore:
                 "market_value": 0, "range_low": 0, "range_high": 0,
                 "comps": [], "used_count": 0, "considered_count": 0,
                 "adjustments_used": adjs,
+                "evidence_quality": self.calculate_evidence_quality(subject, []),
             }
 
         subj_year = get_val(subject, 'year_built')
@@ -614,6 +815,7 @@ class TaxGrieveCore:
                 "market_value": 0, "range_low": 0, "range_high": 0,
                 "comps": [], "used_count": 0, "considered_count": 0,
                 "adjustments_used": adjs,
+                "evidence_quality": self.calculate_evidence_quality(subject, []),
             }
 
         # Median + 1.5×IQR (Tukey fence) outlier filter on reconciled_value.
@@ -670,6 +872,7 @@ class TaxGrieveCore:
             "used_count": len(best),
             "considered_count": len(raw_results),
             "adjustments_used": adjs,
+            "evidence_quality": self.calculate_evidence_quality(subject, raw_results),
         }
 
     def add_manual_comp(self, property_id, address, price):

@@ -233,6 +233,34 @@ def render_methodology(ctx: dict[str, Any]) -> bytes:
     body.append(Paragraph(f"Property: {ctx['subject'].get('address')}", s["Small"]))
     body.append(Spacer(1, 0.15 * inch))
 
+    quality = ctx.get("evidence_quality") or {}
+    if quality:
+        body.append(Paragraph("Evidence Quality", s["H2u"]))
+        body.append(Paragraph(
+            f"<b>{quality.get('score', 0)}% {quality.get('label', 'Weak')} confidence.</b> "
+            "The score reflects comp verification, missing fields, sale freshness, outliers, "
+            "and source quality.", s["Small"]))
+        q_rows = [["Component", "Score", "Basis"]]
+        for component in quality.get("components") or []:
+            q_rows.append([
+                component.get("label", ""),
+                f"{component.get('score', 0)}%",
+                Paragraph(component.get("summary", ""), s["Small"]),
+            ])
+        q_table = Table(q_rows, colWidths=[1.6 * inch, 0.7 * inch, 3.7 * inch])
+        q_table.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, -1), "Helvetica", 8),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f2f4f7")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#dde2e6")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        body.append(q_table)
+        if quality.get("warnings"):
+            body.append(Paragraph(
+                "<b>Quality notes:</b> " + "; ".join(quality["warnings"]),
+                s["Small"]))
+
     body.append(Paragraph("1. Sales-Comparison Approach", s["H2u"]))
     body.append(Paragraph(
         "We estimate the subject's full market value using the sales-comparison approach: "
