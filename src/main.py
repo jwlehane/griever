@@ -520,19 +520,42 @@ async def bar_info(subject_id: int):
 async def reject_comp(request: Request, property_id: int = Form(...), address: str = Form(...), zpid: str = Form(None)):
     conn = sqlite3.connect('grievance_data.db')
     cursor = conn.cursor()
+    # Rejecting a pinned comp un-pins it too — the two states are mutually exclusive.
     if zpid:
-        cursor.execute("UPDATE sales_comps SET status = 'REJECTED' WHERE target_property_id = ? AND zpid = ?", (property_id, zpid))
+        cursor.execute("UPDATE sales_comps SET status = 'REJECTED', pinned = 0 WHERE target_property_id = ? AND zpid = ?", (property_id, zpid))
     else:
-        cursor.execute("UPDATE sales_comps SET status = 'REJECTED' WHERE target_property_id = ? AND address = ?", (property_id, address))
+        cursor.execute("UPDATE sales_comps SET status = 'REJECTED', pinned = 0 WHERE target_property_id = ? AND address = ?", (property_id, address))
     conn.commit()
     conn.close()
-    return HTMLResponse("""
-        <div style="font-family:sans-serif; text-align:center; padding:50px;">
-            <h2>Comp Rejected</h2>
-            <p>This sale will no longer be used in your valuation calculations.</p>
-            <button onclick="window.history.back()" style="padding:10px 20px; background:#34495e; color:white; border:none; border-radius:4px; cursor:pointer;">Back</button>
-        </div>
-    """)
+    return JSONResponse({"status": "ok", "action": "rejected"})
+
+
+@app.post("/include_comp")
+async def include_comp(request: Request, property_id: int = Form(...), address: str = Form(...), zpid: str = Form(None)):
+    """Pin a comp into the USED set — overrides similarity ranking and the
+    outlier filter. Also un-rejects if previously rejected."""
+    conn = sqlite3.connect('grievance_data.db')
+    cursor = conn.cursor()
+    if zpid:
+        cursor.execute("UPDATE sales_comps SET pinned = 1, status = CASE WHEN status = 'REJECTED' THEN 'VERIFIED' ELSE status END WHERE target_property_id = ? AND zpid = ?", (property_id, zpid))
+    else:
+        cursor.execute("UPDATE sales_comps SET pinned = 1, status = CASE WHEN status = 'REJECTED' THEN 'VERIFIED' ELSE status END WHERE target_property_id = ? AND address = ?", (property_id, address))
+    conn.commit()
+    conn.close()
+    return JSONResponse({"status": "ok", "action": "pinned"})
+
+
+@app.post("/unpin_comp")
+async def unpin_comp(request: Request, property_id: int = Form(...), address: str = Form(...), zpid: str = Form(None)):
+    conn = sqlite3.connect('grievance_data.db')
+    cursor = conn.cursor()
+    if zpid:
+        cursor.execute("UPDATE sales_comps SET pinned = 0 WHERE target_property_id = ? AND zpid = ?", (property_id, zpid))
+    else:
+        cursor.execute("UPDATE sales_comps SET pinned = 0 WHERE target_property_id = ? AND address = ?", (property_id, address))
+    conn.commit()
+    conn.close()
+    return JSONResponse({"status": "ok", "action": "unpinned"})
 
 if __name__ == "__main__":
     import uvicorn

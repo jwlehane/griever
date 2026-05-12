@@ -227,6 +227,7 @@ class TaxGrieveCore:
         if 'assessment_2026' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN assessment_2026 REAL")
         if 'assessment_2025' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN assessment_2025 REAL")
         if 'distance_miles' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN distance_miles REAL")
+        if 'pinned' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN pinned INTEGER DEFAULT 0")
 
         # Drop duplicate (target_property_id, zpid) rows that accumulated before
         # we added the UNIQUE index, keeping the most recent (max id) per pair.
@@ -421,6 +422,20 @@ class TaxGrieveCore:
                 # so the valuation step can skip the age adjustment cleanly.
                 year_built = rc.get('yearBuilt') or rc.get('year_built')
 
+                # Coords-based parcel fallback: when RapidAPI didn't supply a
+                # parcelNumber (so verification was skipped) but we do have
+                # lat/lon, hit the county's point-in-polygon endpoint to
+                # recover year_built and other authoritative fields. Without
+                # this, ~60% of sold comps end up with year_built=0 and the
+                # similarity scorer silently drops the age dimension.
+                if official_data is None and comp_lat is not None and comp_lon is not None:
+                    if hasattr(county, 'lookup_by_point'):
+                        try:
+                            official_data = county.lookup_by_point(float(comp_lat), float(comp_lon))
+                        except Exception as ve:
+                            print(f"  coord-fallback skipped for {full_addr}: {ve}")
+                            official_data = None
+
                 comp_obj = None
                 if official_data and sale_price > 0:
                     comp_obj = {
@@ -591,6 +606,7 @@ class TaxGrieveCore:
                 'sale_date': comp.get('sale_date'),
                 'is_outlier': False,
                 'used': False,
+                'pinned': bool(comp.get('pinned')),
             })
 
         if not raw_results:
@@ -619,14 +635,22 @@ class TaxGrieveCore:
         for r in raw_results:
             r['is_outlier'] = not (lo_fence <= r['reconciled_value'] <= hi_fence)
 
-        # Best-N: take top-N by similarity_score among non-outliers; if too few
-        # survive the outlier filter, fall back to the top-N by similarity
-        # ignoring the filter so we never return zero results.
-        kept = [r for r in raw_results if not r['is_outlier']]
-        if len(kept) < min(3, n):
-            kept = list(raw_results)
+        # Best-N: pinned comps always make the USED set (user override beats
+        # both outlier filter and similarity ranking). Remaining slots fill
+        # with top-by-similarity among non-outliers; if too few survive the
+        # outlier filter, fall back to top-N by similarity ignoring the filter
+        # so we never return zero results.
+        pinned_results = [r for r in raw_results if r['pinned']]
+        unpinned = [r for r in raw_results if not r['pinned']]
+        kept = [r for r in unpinned if not r['is_outlier']]
+        if len(kept) < min(3, n - len(pinned_results)):
+            kept = list(unpinned)
         kept.sort(key=lambda r: r['similarity_score'], reverse=True)
-        best = kept[:best_n] if best_n else kept
+        if best_n:
+            remaining = max(0, best_n - len(pinned_results))
+            best = pinned_results + kept[:remaining]
+        else:
+            best = pinned_results + kept
         for r in best:
             r['used'] = True
 

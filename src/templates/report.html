@@ -27,6 +27,9 @@
         .badge-used    { background: #d5f5e0; color: #145a32; }
         .badge-outlier { background: #fadbd8; color: #922b21; }
         .badge-unused  { background: #ecf0f1; color: #7f8c8d; }
+        .badge-missing { background: #fdecea; color: #922b21; }
+        .badge-pinned  { background: #fef5c7; color: #7c5a00; }
+        tr.row-pinned { background: #fffbe6; }
         .narrative { background: #fffde7; padding: 18px; border-radius: 4px; font-style: italic; border: 1px solid #ffe57f; }
         .alert-box { padding: 14px 18px; border-radius: 4px; margin-bottom: 20px; }
         .alert-good { background: #d5f5e0; border: 1px solid #82d59a; color: #145a32; }
@@ -44,10 +47,14 @@
         .filing-card { background: #eaf3fb; border: 1px solid #aed6f1; padding: 18px; border-radius: 4px; margin: 20px 0; }
         .filing-card h3 { margin-top: 0; color: #1f618d; }
         .filing-card .deadline { font-size: 18px; font-weight: bold; color: #c0392b; }
+        tr.comp-extra.hidden { display: none; }
     </style>
 </head>
 <body>
-    <a href="#" class="btn btn-print" onclick="window.print()">🖨 Print</a>
+    <div style="float: right; display: flex; gap: 8px;">
+        <a href="/" class="btn">← Search Another Property</a>
+        <a href="#" class="btn btn-print" onclick="window.print(); return false;" style="float: none;">🖨 Print</a>
+    </div>
     <div class="header">
         <h1>Property Tax Grievance Analysis</h1>
         <h3>{{ subject.address }}{% if subject.town %} — {{ subject.town }}, NY{% endif %}</h3>
@@ -121,10 +128,20 @@
     </div>
 
     <h2>Comparable Sales ({{ used_count }} used of {{ considered_count }} considered)</h2>
+    {# Show USED comps first (highest similarity within them), then the rest. Ensures pinned/used comps are never in the collapsed tail. #}
+    {% set sorted_comps = comps|sort(attribute='similarity_score', reverse=True)|sort(attribute='used', reverse=True) %}
+    {% set comp_preview_limit = 10 %}
+    {% set missing_year_count = sorted_comps|rejectattr('year_built')|list|length + sorted_comps|selectattr('year_built', 'equalto', 0)|list|length %}
+    {% if missing_year_count and considered_count %}
+    <p style="font-size: 12px; color: #922b21; background: #fdecea; border: 1px solid #f5c6cb; padding: 8px 12px; border-radius: 4px;">
+        <strong>Data note:</strong> {{ missing_year_count }} of {{ considered_count }} comps are missing year-built data ({{ (100 * missing_year_count / considered_count)|round(0)|int }}%). For those rows the age dimension (worth ~30% of the similarity score) is dropped, so their score reflects size, lot, and distance only. We're working on filling these from county records.
+    </p>
+    {% endif %}
     <table>
         <thead>
             <tr>
                 <th>Comp Address</th>
+                <th>Year Built</th>
                 <th>Similarity</th>
                 <th>Sale Price</th>
                 <th>Adjusted Value</th>
@@ -132,11 +149,12 @@
             </tr>
         </thead>
         <tbody>
-            {% for comp in comps|sort(attribute='similarity_score', reverse=True) %}
-            <tr id="row-{{ comp.zpid or loop.index }}" class="{% if comp.used %}row-used{% endif %} {% if comp.is_outlier %}row-outlier{% endif %}">
+            {% for comp in sorted_comps %}
+            <tr id="row-{{ comp.zpid or loop.index }}" class="{% if comp.pinned %}row-pinned{% endif %} {% if comp.used and not comp.pinned %}row-used{% endif %} {% if comp.is_outlier %}row-outlier{% endif %} {% if loop.index > comp_preview_limit %}comp-extra hidden{% endif %}">
                 <td>
                     <b>{{ comp.address }}</b>
-                    {% if comp.used %}<span class="badge badge-used">USED</span>{% elif comp.is_outlier %}<span class="badge badge-outlier">OUTLIER</span>{% else %}<span class="badge badge-unused">CONSIDERED</span>{% endif %}
+                    {% if comp.pinned %}<span class="badge badge-pinned" title="You manually included this comp in the valuation.">PINNED</span>{% endif %}
+                    {% if comp.used and not comp.pinned %}<span class="badge badge-used">USED</span>{% elif comp.is_outlier %}<span class="badge badge-outlier">OUTLIER</span>{% elif not comp.used and not comp.pinned %}<span class="badge badge-unused">CONSIDERED</span>{% endif %}
                     <br>
                     <details>
                         <summary>Details & adjustments</summary>
@@ -159,6 +177,13 @@
                     </details>
                 </td>
                 <td>
+                    {% if comp.year_built and comp.year_built > 0 %}
+                        {{ comp.year_built }}
+                    {% else %}
+                        <span class="badge badge-missing" title="Missing year-built data — age dimension dropped from similarity score">N/A</span>
+                    {% endif %}
+                </td>
+                <td>
                     <div style="width: 100%; background: #ecf0f1; height: 8px; border-radius: 4px;">
                         <div style="width: {{ comp.similarity_score }}%; background: {{ '#27ae60' if comp.similarity_score > 60 else ('#f39c12' if comp.similarity_score > 35 else '#bdc3c7') }}; height: 100%; border-radius: 4px;"></div>
                     </div>
@@ -167,12 +192,25 @@
                 <td>${{ "{:,.0f}".format(comp.sale_price) }}</td>
                 <td><strong>${{ "{:,.0f}".format(comp.reconciled_value) }}</strong></td>
                 <td>
+                    {% if comp.pinned %}
+                        <button onclick="unpinComp('{{ comp.address }}', '{{ comp.zpid or '' }}', 'row-{{ comp.zpid or loop.index }}')" style="background: #f39c12; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;" title="Remove this comp from the USED set">Unpin</button>
+                    {% elif not comp.used %}
+                        <button onclick="includeComp('{{ comp.address }}', '{{ comp.zpid or '' }}', 'row-{{ comp.zpid or loop.index }}')" style="background: #27ae60; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;" title="Force-include this comp in the valuation">Include</button>
+                    {% endif %}
                     <button onclick="rejectComp('{{ comp.address }}', '{{ comp.zpid or '' }}', 'row-{{ comp.zpid or loop.index }}')" style="background: #e74c3c; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;">Reject</button>
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    {% if considered_count > comp_preview_limit %}
+    <div style="margin-top: 8px;">
+        <button type="button" id="toggle-extra-comps" onclick="toggleExtraComps()" style="background: #ecf0f1; color: #34495e; border: 1px solid #bdc3c7; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 13px;">
+            Show all {{ considered_count }} comps ({{ considered_count - comp_preview_limit }} more)
+        </button>
+        <small style="color: #7f8c8d; margin-left: 8px;">Only the top {{ used_count }} by similarity are used in the valuation.</small>
+    </div>
+    {% endif %}
 
     {% if reduction > 0 %}
     <h2>Grievance Narrative (Suggested for Form RP-524)</h2>
@@ -249,18 +287,83 @@
         if (el.style.display === 'block') el.style.display = 'none';
         else el.style.display = 'block';
     }
-    function rejectComp(address, zpid, rowId) {
-        if (!confirm("Remove " + address + " from this report?")) return;
+    function toggleExtraComps() {
+        const rows = document.querySelectorAll('tr.comp-extra');
+        const btn = document.getElementById('toggle-extra-comps');
+        const expanded = btn.dataset.expanded === '1';
+        rows.forEach(r => r.classList.toggle('hidden', expanded));
+        btn.dataset.expanded = expanded ? '0' : '1';
+        btn.textContent = expanded ? btn.dataset.showLabel : 'Show fewer comps';
+        if (!btn.dataset.showLabel) btn.dataset.showLabel = btn.textContent;
+    }
+    (function initToggleExtraComps() {
+        const btn = document.getElementById('toggle-extra-comps');
+        if (btn) btn.dataset.showLabel = btn.textContent.trim();
+    })();
+    function _showPendingBanner() {
+        let banner = document.getElementById('comp-edits-banner');
+        if (banner) return;
+        banner = document.createElement('div');
+        banner.id = 'comp-edits-banner';
+        banner.style.cssText = 'position: sticky; top: 0; z-index: 100; background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 10px 14px; border-radius: 4px; margin: 0 0 12px 0; font-size: 13px;';
+        banner.innerHTML = '<strong>Comp selections changed.</strong> The valuation above reflects the previous selection. Re-run the report to update the market value, range, and recommendation.';
+        document.body.insertBefore(banner, document.body.firstChild);
+    }
+    function _postCompAction(endpoint, address, zpid) {
         const fd = new FormData();
         fd.append('property_id', '{{ subject_id }}');
         fd.append('address', address);
         if (zpid) fd.append('zpid', zpid);
-        fetch('/reject_comp', { method: 'POST', body: fd }).then(() => {
+        return fetch(endpoint, { method: 'POST', body: fd });
+    }
+    function includeComp(address, zpid, rowId) {
+        _postCompAction('/include_comp', address, zpid).then(() => {
             const row = document.getElementById(rowId);
+            const nameCell = row.querySelector('td:first-child');
+            // Strip existing status badges and add PINNED.
+            nameCell.querySelectorAll('.badge-used, .badge-outlier, .badge-unused, .badge-pinned').forEach(b => b.remove());
+            const badge = document.createElement('span');
+            badge.className = 'badge badge-pinned';
+            badge.title = 'You manually included this comp in the valuation.';
+            badge.textContent = 'PINNED';
+            const addrEl = nameCell.querySelector('b');
+            addrEl.insertAdjacentElement('afterend', badge);
+            addrEl.insertAdjacentText('afterend', ' ');
+            row.classList.add('row-pinned');
+            row.classList.remove('row-used');
+            // Swap action buttons: Include -> Unpin.
+            const incBtn = row.querySelector('button[onclick^="includeComp"]');
+            if (incBtn) {
+                incBtn.outerHTML = `<button onclick="unpinComp('${address.replace(/'/g, "\\'")}', '${zpid || ''}', '${rowId}')" style="background: #f39c12; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;" title="Remove this comp from the USED set">Unpin</button>`;
+            }
+            _showPendingBanner();
+        });
+    }
+    function unpinComp(address, zpid, rowId) {
+        _postCompAction('/unpin_comp', address, zpid).then(() => {
+            const row = document.getElementById(rowId);
+            const nameCell = row.querySelector('td:first-child');
+            const pinned = nameCell.querySelector('.badge-pinned');
+            if (pinned) pinned.remove();
+            row.classList.remove('row-pinned');
+            // Swap Unpin -> Include.
+            const unpinBtn = row.querySelector('button[onclick^="unpinComp"]');
+            if (unpinBtn) {
+                unpinBtn.outerHTML = `<button onclick="includeComp('${address.replace(/'/g, "\\'")}', '${zpid || ''}', '${rowId}')" style="background: #27ae60; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;" title="Force-include this comp in the valuation">Include</button>`;
+            }
+            _showPendingBanner();
+        });
+    }
+    function rejectComp(address, zpid, rowId) {
+        if (!confirm("Remove " + address + " from this report?")) return;
+        _postCompAction('/reject_comp', address, zpid).then(() => {
+            const row = document.getElementById(rowId);
+            _showPendingBanner();
             row.style.opacity = '0.3';
             row.style.textDecoration = 'line-through';
-            row.querySelector('button').disabled = true;
-            row.querySelector('button').innerText = 'Rejected';
+            row.querySelectorAll('button').forEach(b => { b.disabled = true; });
+            const rejectBtn = row.querySelector('button[onclick^="rejectComp"]');
+            if (rejectBtn) rejectBtn.innerText = 'Rejected';
         });
     }
     // Lazy-load BAR filing info

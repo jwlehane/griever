@@ -148,3 +148,50 @@ class UlsterCounty(CountyInterface):
     def get_town_from_identifier(self, identifier: str) -> str:
         swis = identifier[:6]
         return self.swis_map.get(swis, "Kingston")
+
+    def lookup_by_point(self, lat: float, lon: float) -> dict:
+        """Resolve a parcel from a (lat, lon) by point-in-polygon intersect.
+
+        Used as a fallback when RapidAPI's comp payload lacks a parcelNumber
+        but does carry coordinates — without this, year_built and other
+        authoritative fields go unfilled for ~60% of sold comps.
+        """
+        if lat is None or lon is None:
+            return None
+        params = {
+            "geometry": f"{lon},{lat}",
+            "geometryType": "esriGeometryPoint",
+            "inSR": 4326,
+            "spatialRel": "esriSpatialRelIntersects",
+            "where": "COUNTY_NAME='Ulster'",
+            "outFields": "*",
+            "returnGeometry": "false",
+            "resultRecordCount": 1,
+            "f": "json",
+        }
+        try:
+            resp = self.session.get(NYS_PARCELS_URL, params=params, timeout=self.timeout)
+            resp.raise_for_status()
+            feats = resp.json().get("features", []) or []
+        except requests.RequestException:
+            return None
+        if not feats:
+            return None
+        a = feats[0]["attributes"]
+        identifier = f"{a.get('SWIS', '')}{a.get('SBL', '')}"
+        full_baths = a.get("NBR_FULL_BATHS") or 0
+        address = a.get("PARCEL_ADDR") or " ".join(
+            [s for s in [a.get("LOC_ST_NBR"), a.get("LOC_STREET")] if s]
+        ).strip()
+        return {
+            "address": (address or "").title(),
+            "sbl": identifier,
+            "sqft": float(a.get("SQFT_LIVING") or 0),
+            "acreage": float(a.get("ACRES") or a.get("CALC_ACRES") or 0),
+            "bedrooms": int(a.get("NBR_BEDROOMS") or 0),
+            "bathrooms": float(full_baths),
+            "year_built": int(a.get("YR_BLT") or 0),
+            "assessment_2026": float(a.get("TOTAL_AV") or 0),
+            "assessment_2025": 0.0,
+            "property_class": (a.get("PROP_CLASS") or "").strip(),
+        }
