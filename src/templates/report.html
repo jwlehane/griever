@@ -4,188 +4,288 @@
     <meta charset="UTF-8">
     <title>Grievance Report - {{ subject.address }}</title>
     <style>
-        body { font-family: sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 40px auto; padding: 20px; }
-        .header { border-bottom: 2px solid #2c3e50; padding-bottom: 10px; margin-bottom: 30px; }
-        .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
-        .stat-box { background: #f8f9fa; padding: 15px; border-radius: 4px; border-left: 4px solid #27ae60; }
-        .stat-box h4 { margin: 0; color: #7f8c8d; font-size: 12px; text-transform: uppercase; }
-        .stat-box p { margin: 5px 0 0; font-size: 20px; font-weight: bold; }
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
-        th { background: #f2f2f2; }
-        .narrative { background: #fffde7; padding: 20px; border-radius: 4px; font-style: italic; border: 1px solid #ffe57f; }
-        .alert-box { background: #fff3e0; border: 1px solid #ffb74d; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
-        .btn-print { background: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; float: right; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; color: #2c3e50; max-width: 880px; margin: 32px auto; padding: 20px; }
+        h1, h2 { color: #1a252f; }
+        h2 { border-bottom: 1px solid #e0e6ed; padding-bottom: 6px; margin-top: 32px; }
+        .header { border-bottom: 2px solid #2c3e50; padding-bottom: 10px; margin-bottom: 24px; }
+        .header h3 { color: #7f8c8d; font-weight: 400; margin: 4px 0 0; }
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 14px; margin-bottom: 24px; }
+        .stat-box { background: #f8f9fa; padding: 14px 16px; border-radius: 4px; border-left: 4px solid #27ae60; }
+        .stat-box.warn { border-left-color: #e67e22; }
+        .stat-box.bad  { border-left-color: #c0392b; }
+        .stat-box.neutral { border-left-color: #7f8c8d; }
+        .stat-box h4 { margin: 0; color: #7f8c8d; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-box p { margin: 6px 0 0; font-size: 22px; font-weight: 700; line-height: 1.1; }
+        .stat-box small { color: #95a5a6; font-size: 11px; display: block; margin-top: 4px; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+        th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #ecf0f1; vertical-align: top; }
+        th { background: #f2f4f7; color: #7f8c8d; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        tr.row-used { background: #f3faf5; }
+        tr.row-outlier { color: #c0392b; }
+        tr.row-outlier td { background: #fff5f5; }
+        .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; letter-spacing: 0.5px; margin-right: 4px; }
+        .badge-used    { background: #d5f5e0; color: #145a32; }
+        .badge-outlier { background: #fadbd8; color: #922b21; }
+        .badge-unused  { background: #ecf0f1; color: #7f8c8d; }
+        .narrative { background: #fffde7; padding: 18px; border-radius: 4px; font-style: italic; border: 1px solid #ffe57f; }
+        .alert-box { padding: 14px 18px; border-radius: 4px; margin-bottom: 20px; }
+        .alert-good { background: #d5f5e0; border: 1px solid #82d59a; color: #145a32; }
+        .alert-mid  { background: #fff3e0; border: 1px solid #ffb74d; color: #7c4a00; }
+        .alert-bad  { background: #fadbd8; border: 1px solid #e6b0aa; color: #6e2018; }
+        .btn { display: inline-block; background: #2c3e50; color: white; padding: 9px 16px; text-decoration: none; border-radius: 4px; border: none; font-size: 14px; cursor: pointer; }
+        .btn-print { float: right; }
+        .btn-primary { background: #27ae60; }
+        .btn-row { display: flex; gap: 10px; margin: 16px 0; flex-wrap: wrap; }
+        .disclaimer { font-size: 11px; color: #7f8c8d; border-top: 1px solid #ecf0f1; margin-top: 40px; padding-top: 16px; line-height: 1.5; }
+        .spec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; font-size: 13px; }
+        .er-line { font-size: 13px; color: #7f8c8d; }
+        details summary { cursor: pointer; color: #3498db; font-size: 13px; padding: 6px 0; }
+        details[open] summary { color: #2c3e50; font-weight: 600; }
+        .filing-card { background: #eaf3fb; border: 1px solid #aed6f1; padding: 18px; border-radius: 4px; margin: 20px 0; }
+        .filing-card h3 { margin-top: 0; color: #1f618d; }
+        .filing-card .deadline { font-size: 18px; font-weight: bold; color: #c0392b; }
     </style>
 </head>
 <body>
-    <a href="#" class="btn-print" onclick="window.print()">Print Report</a>
+    <a href="#" class="btn btn-print" onclick="window.print()">🖨 Print</a>
     <div class="header">
-        <h1>Property Tax Grievance Report</h1>
-        <h3>{{ subject.address }}</h3>
+        <h1>Property Tax Grievance Analysis</h1>
+        <h3>{{ subject.address }}{% if subject.town %} — {{ subject.town }}, NY{% endif %}</h3>
     </div>
 
-    <div class="stat-grid">
-        <div class="stat-box">
-            <h4>Current Assessment</h4>
-            <p>${{ "{:,.0f}".format(subject.assessment_2025) }}</p>
-        </div>
-        <div class="stat-box">
-            <h4>Market Value (Est)</h4>
-            <p>${{ "{:,.0f}".format(market_value) }}</p>
-        </div>
-        <div class="stat-box">
-            <h4>Recommended Reduction</h4>
-            <p style="color: {{ '#c0392b' if reduction > 0 else '#7f8c8d' }};">
-                ${{ "{:,.0f}".format(reduction) if reduction > 0 else '0' }}
-            </p>
-        </div>
+    {% if reduction > 0 %}
+    <div class="alert-box alert-good">
+        <strong>✅ Grievance Appears Warranted.</strong>
+        Filing RP-524 could reduce your assessment by approximately <strong>${{ "{:,.0f}".format(reduction) }}</strong>.
     </div>
-
-    {% if reduction <= 0 %}
-    <div class="alert-box">
-        <strong>⚠️ Recommendation: No Grievance Advised</strong><br>
-        Based on available comparable sales, your property's estimated market value is higher than or equal to its current assessment. 
-        Filing a grievance may not be successful at this time.
+    {% else %}
+    <div class="alert-box alert-mid">
+        <strong>ℹ️ No Grievance Recommended.</strong>
+        Your equalization-adjusted market value is in line with — or below — comparable sales. Filing now is unlikely to succeed.
     </div>
     {% endif %}
 
-    <h2>Subject Characteristics</h2>
-    <ul>
-        <li><strong>Living Area:</strong> {{ "{:,.0f}".format(subject.sqft) }} sq. ft.</li>
-        <li><strong>Acreage:</strong> {{ subject.acreage }} acres</li>
-        <li><strong>Bedrooms/Baths:</strong> {{ subject.bedrooms }} / {{ subject.bathrooms }}</li>
-        <li><strong>Year Built:</strong> {{ subject.year_built }}</li>
-    </ul>
+    <div class="stat-grid">
+        <div class="stat-box neutral">
+            <h4>Current Assessment</h4>
+            <p>${{ "{:,.0f}".format(current_av or 0) }}</p>
+            <small>{{ subject.town or 'Local' }} tax roll</small>
+        </div>
+        <div class="stat-box neutral">
+            <h4>Equalization Rate</h4>
+            <p>{{ "{:.2f}%".format(equalization_rate) if equalization_rate else 'Unknown' }}</p>
+            <small>{{ '2025 RAR (NYS ORPTS)' if equalization_rate else 'Defaulted to 100%' }}</small>
+        </div>
+        <div class="stat-box {{ 'warn' if implied_market_value and implied_market_value > market_value else 'neutral' }}">
+            <h4>Implied Mkt Value (from AV)</h4>
+            <p>${{ "{:,.0f}".format(implied_market_value) if implied_market_value else "{:,.0f}".format(current_av or 0) }}</p>
+            <small>AV ÷ (ER ÷ 100)</small>
+        </div>
+        <div class="stat-box">
+            <h4>Comp-Derived Market</h4>
+            <p>${{ "{:,.0f}".format(market_value) }}</p>
+            <small>${{ "{:,.0f}".format(range_low) }} – ${{ "{:,.0f}".format(range_high) }}</small>
+        </div>
+        <div class="stat-box {{ 'bad' if reduction > 0 else 'neutral' }}">
+            <h4>Recommended AV Reduction</h4>
+            <p>${{ "{:,.0f}".format(reduction or 0) }}</p>
+            <small>Reduce roll AV from ${{ "{:,.0f}".format(current_av or 0) }} to ${{ "{:,.0f}".format((current_av or 0) - (reduction or 0)) }}</small>
+        </div>
+    </div>
 
-    <h2>Comparable Sales (Adjusted)</h2>
+    <details>
+        <summary>How is this calculated?</summary>
+        <div style="padding: 10px 14px; background: #fafbfc; border-left: 3px solid #bdc3c7; font-size: 13px;">
+            <p><strong>Method:</strong> Sales-comparison approach using {{ used_count }} best-matching comparable sales (out of {{ considered_count }} considered), with median + 1.5×IQR outlier filter.</p>
+            <p><strong>Equalization rate handling:</strong> Your assessment of ${{ "{:,.0f}".format(current_av or 0) }} is divided by your municipality's {{ equalization_rate|round(2) if equalization_rate else 100 }}% rate to derive an <em>implied full market value</em> of ${{ "{:,.0f}".format(implied_market_value) if implied_market_value else "{:,.0f}".format(current_av or 0) }}. We compare that against the comp-derived market value.</p>
+            <p><strong>Local adjustment factors used:</strong></p>
+            <ul>
+                <li>${{ "{:,.0f}".format(adjustments_used.sqft) }} per sqft of GLA difference</li>
+                <li>${{ "{:,.0f}".format(adjustments_used.bathroom) }} per full bath</li>
+                <li>${{ "{:,.0f}".format(adjustments_used.bedroom) }} per bedroom</li>
+                <li>${{ "{:,.0f}".format(adjustments_used.acre) }} per acre of lot difference</li>
+                <li>${{ "{:,.0f}".format(adjustments_used.year_built) }} per year of age difference</li>
+            </ul>
+            <p style="color:#7f8c8d;"><em>Factors are first-cut estimates based on local market conditions. Paired-sales calibration is on the roadmap.</em></p>
+        </div>
+    </details>
+
+    <h2>Subject Characteristics</h2>
+    <div class="spec-grid">
+        <div><strong>Living area:</strong> {{ "{:,.0f}".format(subject.sqft) }} sq. ft.</div>
+        <div><strong>Year built:</strong> {{ subject.year_built or 'N/A' }}</div>
+        <div><strong>Bedrooms / Baths:</strong> {{ subject.bedrooms }} / {{ subject.bathrooms }}</div>
+        <div><strong>Acreage:</strong> {{ "{:.2f}".format(subject.acreage) if subject.acreage else 'N/A' }} acres</div>
+        <div><strong>SBL:</strong> <code>{{ subject.sbl }}</code></div>
+        <div><strong>Property class:</strong> {{ subject.property_class or 'N/A' }}</div>
+    </div>
+
+    <h2>Comparable Sales ({{ used_count }} used of {{ considered_count }} considered)</h2>
     <table>
         <thead>
             <tr>
                 <th>Comp Address</th>
-                <th>Quality</th>
+                <th>Similarity</th>
                 <th>Sale Price</th>
                 <th>Adjusted Value</th>
                 <th>Action</th>
             </tr>
         </thead>
         <tbody>
-            {% for comp in comps %}
-            <tr id="row-{{ comp.zpid or loop.index }}" style="{{ 'background: #fff5f5; color: #c0392b;' if comp.is_outlier else '' }}">
+            {% for comp in comps|sort(attribute='similarity_score', reverse=True) %}
+            <tr id="row-{{ comp.zpid or loop.index }}" class="{% if comp.used %}row-used{% endif %} {% if comp.is_outlier %}row-outlier{% endif %}">
                 <td>
                     <b>{{ comp.address }}</b>
-                    {% if comp.is_outlier %}<br><small><b>⚠️ OUTLIER</b></small>{% endif %}
+                    {% if comp.used %}<span class="badge badge-used">USED</span>{% elif comp.is_outlier %}<span class="badge badge-outlier">OUTLIER</span>{% else %}<span class="badge badge-unused">CONSIDERED</span>{% endif %}
                     <br>
-                    <span class="details-btn" onclick="toggleDetails('details-{{ loop.index }}')" style="color:#3498db; cursor:pointer; font-size:11px; text-decoration:underline;">View Details ▼</span>
-                    <div id="details-{{ loop.index }}" style="display:none; font-size:12px; margin-top:10px; border-top:1px solid #eee; padding-top:10px;">
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px;">
+                    <details>
+                        <summary>Details & adjustments</summary>
+                        <div class="spec-grid" style="margin-top: 6px;">
                             <span><b>Size:</b> {{ "{:,.0f}".format(comp.sqft) }} sqft</span>
-                            <span><b>Year:</b> {{ comp.year_built }}</span>
+                            <span><b>Year:</b> {{ comp.year_built or 'N/A' }}</span>
                             <span><b>Beds/Baths:</b> {{ comp.bedrooms }}/{{ comp.bathrooms }}</span>
-                            <span><b>2026 Assmt:</b> ${{ "{:,.0f}".format(comp.assessment_2026) if comp.assessment_2026 > 0 else 'N/A' }}</span>
-                            <span><b>2025 Assmt:</b> ${{ "{:,.0f}".format(comp.assessment_2025) if comp.assessment_2025 > 0 else 'N/A' }}</span>
+                            <span><b>Acreage:</b> {{ "{:.2f}".format(comp.acreage) if comp.acreage else 'N/A' }}</span>
+                            <span><b>Sale date:</b> {{ comp.sale_date or 'N/A' }}</span>
+                            <span><b>Status:</b> {{ comp.status or 'N/A' }}</span>
                         </div>
-                    </div>
+                        <div style="margin-top:8px; font-size: 12px;">
+                            <b>Adjustments applied:</b>
+                            GLA {{ "${:+,.0f}".format(comp.adjustments.gla) }} ·
+                            Acreage {{ "${:+,.0f}".format(comp.adjustments.acreage) }} ·
+                            Bath {{ "${:+,.0f}".format(comp.adjustments.bath) }} ·
+                            Bed {{ "${:+,.0f}".format(comp.adjustments.bed) }} ·
+                            Age {{ "${:+,.0f}".format(comp.adjustments.age) }}
+                        </div>
+                    </details>
                 </td>
                 <td>
-                    <div style="width: 100%; background: #eee; height: 10px; border-radius: 5px;">
-                        <div style="width: {{ comp.similarity_score }}%; background: {{ '#27ae60' if comp.similarity_score > 70 else '#f1c40f' }}; height: 100%; border-radius: 5px;"></div>
+                    <div style="width: 100%; background: #ecf0f1; height: 8px; border-radius: 4px;">
+                        <div style="width: {{ comp.similarity_score }}%; background: {{ '#27ae60' if comp.similarity_score > 60 else ('#f39c12' if comp.similarity_score > 35 else '#bdc3c7') }}; height: 100%; border-radius: 4px;"></div>
                     </div>
-                    <small>{{ comp.similarity_score }}% match</small>
+                    <small>{{ comp.similarity_score }}%</small>
                 </td>
                 <td>${{ "{:,.0f}".format(comp.sale_price) }}</td>
                 <td><strong>${{ "{:,.0f}".format(comp.reconciled_value) }}</strong></td>
                 <td>
-                    <button onclick="rejectComp('{{ comp.address }}', '{{ comp.zpid or '' }}', 'row-{{ comp.zpid or loop.index }}')" style="background: #e74c3c; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;">Reject</button>
+                    <button onclick="rejectComp('{{ comp.address }}', '{{ comp.zpid or '' }}', 'row-{{ comp.zpid or loop.index }}')" style="background: #e74c3c; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;">Reject</button>
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 
-    <script>
-        function toggleDetails(id) {
-            const el = document.getElementById(id);
-            if (el.style.display === 'block') el.style.display = 'none';
-            else el.style.display = 'block';
-        }
-
-        function rejectComp(address, zpid, rowId) {
-            if (confirm("Are you sure you want to remove " + address + " from this report?")) {
-                const formData = new FormData();
-                formData.append('property_id', '{{ subject_id }}');
-                formData.append('address', address);
-                if (zpid) formData.append('zpid', zpid);
-
-                fetch('/reject_comp', { method: 'POST', body: formData })
-                    .then(() => {
-                        const row = document.getElementById(rowId);
-                        row.style.opacity = '0.3';
-                        row.style.textDecoration = 'line-through';
-                        row.querySelector('button').disabled = true;
-                        row.querySelector('button').innerText = 'Rejected';
-                    });
-            }
-        }
-    </script>
-
-    <h2>Suggestion Engine</h2>
-    <div style="background: #e3f2fd; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
-        <ul style="margin: 0; padding-left: 20px;">
-            {% set outliers = [] %}
-            {% for comp in comps %}
-                {% if (comp.reconciled_value - market_value)|abs / market_value > 0.25 %}
-                    <li>⚠️ <strong>Outlier:</strong> {{ comp.address }} is significantly {{ "high" if comp.reconciled_value > market_value else "low" }} (${{ "{:,.0f}".format(comp.reconciled_value) }}). 
-                        Consider removing this to refine the valuation.</li>
-                    {% set _ = outliers.append(1) %}
-                {% endif %}
-            {% endfor %}
-            {% if reduction > 0 %}
-                <li>✅ <strong>Ready for Submission:</strong> Use the narrative below for your RP-524 form.</li>
-            {% else %}
-                <li>ℹ️ <strong>Optimization Needed:</strong> Consider finding lower-priced comparable sales to support a reduction.</li>
-            {% endif %}
-        </ul>
-    </div>
-
     {% if reduction > 0 %}
-    <h2>Grievance Narrative (Form RP-524)</h2>
+    <h2>Grievance Narrative (Suggested for Form RP-524)</h2>
     <div class="narrative">
-        The subject property located at {{ subject.address }} is currently assessed at ${{ "{:,.0f}".format(subject.assessment_2025) }}. 
-        Based on a review of {{ "{:,.0f}".format(subject.sqft) }} sq. ft. comparable residential sales in the immediate market area, 
-        the indicated market value is approximately ${{ "{:,.0f}".format(market_value) }}. 
-        
-        Adjustments were made for differences in square footage, acreage, and utility to arrive at this figure. 
-        I respectfully request that the assessment be reduced to ${{ "{:,.0f}".format(market_value) }} to align with fair market value.
+        The subject property located at {{ subject.address }}{% if subject.town %} in {{ subject.town }}, NY{% endif %} is currently assessed at <strong>${{ "{:,.0f}".format(current_av or 0) }}</strong>{% if equalization_rate %} on a {{ equalization_rate|round(2) }}% equalization-rate tax roll, implying a full market value of <strong>${{ "{:,.0f}".format(implied_market_value) }}</strong>{% endif %}.
+        Based on a sales-comparison analysis of {{ used_count }} recent comparable single-family sales in the immediate market area (median sale price within an outlier-filtered set), the indicated full market value of this property is approximately <strong>${{ "{:,.0f}".format(market_value) }}</strong> (range ${{ "{:,.0f}".format(range_low) }}–${{ "{:,.0f}".format(range_high) }}).
+        Per-comp adjustments were applied for differences in gross living area, bedrooms, bathrooms, lot size, and effective age using locally-derived adjustment factors.
+        I respectfully request that the {{ subject.town or 'municipal' }} assessment of this property be reduced to <strong>${{ "{:,.0f}".format((current_av or 0) - reduction) }}</strong>{% if equalization_rate %} (which, at the {{ equalization_rate|round(2) }}% equalization rate, corresponds to a full market value of ${{ "{:,.0f}".format(market_value) }}){% endif %}.
     </div>
     {% endif %}
 
-    <div style="margin-top: 30px; background: #e8f5e9; padding: 20px; border-radius: 4px; border: 1px solid #c8e6c9;">
-        <h3 style="margin-top:0;">🛠️ Refine with Renovation</h3>
-        <p style="font-size: 14px;">If this property has undergone a significant renovation, we can calculate an <strong>Effective Age</strong> to ensure a fair valuation.</p>
-        <form action="/report" method="post" style="display: flex; gap: 10px; align-items: center;">
-            <input type="hidden" name="address" value="{{ subject.address }}">
-            <input type="hidden" name="subject_id" value="{{ subject_id }}">
-            <input type="hidden" name="skip_discovery" value="true">
-            <label for="renovation_year" style="font-size: 14px;">Year of Major Renovation:</label>
-            <input type="number" id="renovation_year" name="renovation_year" value="{{ renovation_year or '' }}" placeholder="YYYY" style="width: 80px; padding: 10px;" min="1900" max="2026">
-            <button type="submit" style="padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer;">Update Valuation</button>
-        </form>
+    <h2>Filing Instructions</h2>
+    <div id="filing-card" class="filing-card">
+        <p>Loading BAR (Board of Assessment Review) information for {{ subject.town or 'your municipality' }}…</p>
     </div>
 
-    <div style="margin-top: 50px; background: #f8f9fa; padding: 20px; border-radius: 4px; border: 1px solid #ddd;">
-        <h3 style="margin-top:0;">➕ Add Another Comp</h3>
-        <p style="font-size: 14px;">Did you find a better comp on ParcelAccess? Add it manually to refine your report.</p>
-        <form action="/add_comp" method="post" style="display: flex; gap: 10px;">
+    <div class="btn-row">
+        <a class="btn btn-primary" href="/grievance/rp524.pdf?subject_id={{ subject_id }}{% if renovation_year %}&renovation_year={{ renovation_year }}{% endif %}&condition={{ condition }}">📄 Download RP-524 PDF</a>
+        <a class="btn" href="/grievance/methodology.pdf?subject_id={{ subject_id }}{% if renovation_year %}&renovation_year={{ renovation_year }}{% endif %}&condition={{ condition }}">📑 Methodology PDF</a>
+        <a class="btn" href="/grievance/package.zip?subject_id={{ subject_id }}{% if renovation_year %}&renovation_year={{ renovation_year }}{% endif %}&condition={{ condition }}">📦 Full Evidence Package</a>
+    </div>
+
+    <h2>Refine the Estimate</h2>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div style="background: #e8f5e9; padding: 16px; border-radius: 4px;">
+            <h3 style="margin-top:0; font-size: 16px;">🛠 Recent Renovation?</h3>
+            <p style="font-size: 13px;">If this property has had a major renovation, the year-built factor will be re-computed against an effective age.</p>
+            <form action="/report" method="post" style="display: flex; gap: 8px; align-items: center;">
+                <input type="hidden" name="address" value="{{ subject.address }}">
+                <input type="hidden" name="subject_id" value="{{ subject_id }}">
+                <input type="hidden" name="skip_discovery" value="true">
+                <input type="hidden" name="condition" value="{{ condition }}">
+                <input type="number" name="renovation_year" value="{{ renovation_year or '' }}" placeholder="YYYY" style="width: 90px; padding: 8px;" min="1900" max="2026">
+                <button type="submit" class="btn btn-primary">Update</button>
+            </form>
+        </div>
+        <div style="background: #fff8e1; padding: 16px; border-radius: 4px;">
+            <h3 style="margin-top:0; font-size: 16px;">🏚 Condition vs. typical block</h3>
+            <p style="font-size: 13px;">Below-average condition (deferred maintenance) lowers the estimate by 15%; renovated raises it by 20%.</p>
+            <form action="/report" method="post" style="display: flex; gap: 8px; align-items: center;">
+                <input type="hidden" name="address" value="{{ subject.address }}">
+                <input type="hidden" name="subject_id" value="{{ subject_id }}">
+                <input type="hidden" name="skip_discovery" value="true">
+                {% if renovation_year %}<input type="hidden" name="renovation_year" value="{{ renovation_year }}">{% endif %}
+                <select name="condition" style="flex: 1; padding: 8px;">
+                    <option value="below"    {% if condition=='below'    %}selected{% endif %}>Below average</option>
+                    <option value="average"  {% if condition=='average' or not condition  %}selected{% endif %}>Average</option>
+                    <option value="above"    {% if condition=='above'    %}selected{% endif %}>Above average</option>
+                    <option value="renovated"{% if condition=='renovated'%}selected{% endif %}>Renovated</option>
+                </select>
+                <button type="submit" class="btn btn-primary">Update</button>
+            </form>
+        </div>
+    </div>
+
+    <h2>Add a Comp Manually</h2>
+    <div style="background: #f8f9fa; padding: 16px; border-radius: 4px; border: 1px solid #e0e6ed;">
+        <p style="font-size: 13px;">Found a better comp on Zillow or county records? Add it manually — we'll verify and recalculate.</p>
+        <form action="/add_comp" method="post" style="display: flex; gap: 8px;">
             <input type="hidden" name="property_id" value="{{ subject_id }}">
             <input type="text" name="address" placeholder="Comp Address" style="flex: 2; padding: 10px;" required>
             <input type="number" name="price" placeholder="Sale Price ($)" style="flex: 1; padding: 10px;" required>
-            <button type="submit" style="padding: 10px 20px; background: #34495e; color: white; border: none; border-radius: 4px; cursor: pointer;">Add & Refresh</button>
+            <button type="submit" class="btn">Add & Recalculate</button>
         </form>
     </div>
 
-    <div style="margin-top: 50px; text-align: center; color: #bdc3c7; font-size: 12px;">
-        Generated by TaxGrieve Rhinebeck. Confidentially built for private use.
+    <div class="disclaimer">
+        <strong>Disclaimer.</strong> This report is an automated estimate based on public assessment-roll data and recent real-estate listings. It is <strong>not</strong> a certified appraisal and does <strong>not</strong> constitute legal or tax advice. Filing decisions and the accuracy of any RP-524 you submit are your sole responsibility. For high-value or complex properties, consult a licensed real estate appraiser or tax-grievance attorney. Data sources: NYS Office of Real Property Tax Services (assessment, RAR, parcel records), RapidAPI Real-Time Real-Estate Data (recent sales), US Census Geocoder (address validation).
     </div>
+
+    <script>
+    function toggleDetails(id) {
+        const el = document.getElementById(id);
+        if (el.style.display === 'block') el.style.display = 'none';
+        else el.style.display = 'block';
+    }
+    function rejectComp(address, zpid, rowId) {
+        if (!confirm("Remove " + address + " from this report?")) return;
+        const fd = new FormData();
+        fd.append('property_id', '{{ subject_id }}');
+        fd.append('address', address);
+        if (zpid) fd.append('zpid', zpid);
+        fetch('/reject_comp', { method: 'POST', body: fd }).then(() => {
+            const row = document.getElementById(rowId);
+            row.style.opacity = '0.3';
+            row.style.textDecoration = 'line-through';
+            row.querySelector('button').disabled = true;
+            row.querySelector('button').innerText = 'Rejected';
+        });
+    }
+    // Lazy-load BAR filing info
+    (function loadBAR() {
+        fetch('/bar_info?subject_id={{ subject_id }}')
+            .then(r => r.json())
+            .then(d => {
+                const card = document.getElementById('filing-card');
+                if (!d || !d.municipality) {
+                    card.innerHTML = '<em>Filing information not yet available for this municipality.</em>';
+                    return;
+                }
+                const html = `
+                    <h3>${d.municipality}, NY — Board of Assessment Review</h3>
+                    <p class="deadline">Grievance Day: ${d.grievance_day || 'See below'}</p>
+                    <p><strong>Submit to:</strong><br>${(d.bar_address || '').replace(/\n/g,'<br>')}</p>
+                    <p><strong>Method:</strong> ${d.submission_method || 'In person at Town Hall'}</p>
+                    ${d.notes ? '<p><em>'+d.notes+'</em></p>' : ''}
+                    <p style="margin-top: 10px; font-size: 12px; color: #7f8c8d;">Verify deadline with the assessor before filing — Grievance Day varies year-to-year for some municipalities.</p>`;
+                card.innerHTML = html;
+            })
+            .catch(() => {
+                document.getElementById('filing-card').innerHTML = '<em>Filing information not yet available.</em>';
+            });
+    })();
+    </script>
 </body>
 </html>
