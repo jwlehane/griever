@@ -219,7 +219,8 @@ class TaxGrieveCore:
                          sale_price REAL, sale_date TEXT, sqft REAL, acreage REAL, bedrooms REAL,
                          bathrooms REAL, year_built INTEGER, zpid TEXT, status TEXT DEFAULT 'VERIFIED',
                          similarity_score REAL, is_outlier INTEGER DEFAULT 0,
-                         assessment_2026 REAL, assessment_2025 REAL)''')
+                         assessment_2026 REAL, assessment_2025 REAL, distance_miles REAL,
+                         rejection_reason TEXT, is_selected INTEGER DEFAULT 0, grade TEXT)''')
         cursor.execute("PRAGMA table_info(sales_comps)")
         cols = [c[1] for c in cursor.fetchall()]
         if 'zpid' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN zpid TEXT")
@@ -227,6 +228,9 @@ class TaxGrieveCore:
         if 'assessment_2026' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN assessment_2026 REAL")
         if 'assessment_2025' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN assessment_2025 REAL")
         if 'distance_miles' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN distance_miles REAL")
+        if 'rejection_reason' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN rejection_reason TEXT")
+        if 'is_selected' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN is_selected INTEGER DEFAULT 0")
+        if 'grade' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN grade TEXT")
 
         # Drop duplicate (target_property_id, zpid) rows that accumulated before
         # we added the UNIQUE index, keeping the most recent (max id) per pair.
@@ -450,18 +454,25 @@ class TaxGrieveCore:
                     }
 
                 if comp_obj:
+                    # Calculate Grade & Score immediately
+                    comp_obj['grade'] = self.calculate_similarity_grade(subject, comp_obj)
+                    comp_obj['similarity_score'] = self.calculate_similarity(subject, comp_obj)
+                    comp_obj['is_selected'] = 0 # Default to unselected for human review
+
                     # Ensure distance_miles column exists (migration is idempotent)
                     cursor.execute("PRAGMA table_info(sales_comps)")
                     _existing = {row[1] for row in cursor.fetchall()}
                     if 'distance_miles' not in _existing:
                         cursor.execute("ALTER TABLE sales_comps ADD COLUMN distance_miles REAL")
                         conn.commit()
+                    
                     cursor.execute("""
-                        INSERT OR REPLACE INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, zpid, status, assessment_2026, distance_miles)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT OR REPLACE INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, zpid, status, assessment_2026, distance_miles, grade, similarity_score, is_selected)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (subject_id, comp_obj['address'], comp_obj['sbl'], comp_obj['sale_price'], comp_obj['sale_date'],
                          comp_obj['sqft'], comp_obj['acreage'], comp_obj['bedrooms'], comp_obj['bathrooms'], comp_obj['year_built'],
-                         comp_obj['zpid'], comp_obj['status'], comp_obj.get('assessment_2026', 0), comp_obj.get('distance_miles')))
+                         comp_obj['zpid'], comp_obj['status'], comp_obj.get('assessment_2026', 0), comp_obj.get('distance_miles'),
+                         comp_obj['grade'], comp_obj['similarity_score'], comp_obj['is_selected']))
                     conn.commit()
                     enriched_comps.append(comp_obj)
                     yield {"status": "verified", "comp": comp_obj}
@@ -517,8 +528,38 @@ class TaxGrieveCore:
         score = sum(n * w for n, w in avail) / total_w * 100
         return round(score, 1)
 
+    def calculate_similarity_grade(self, subject, comp, renovation_year=None, valuation_date="2024-07-01"):
+        """
+        Assigns a letter grade (A, B, C, F) based on similarity score and sale date proximity.
+        NYS BARs prioritize sales within 12 months of the Valuation Date.
+        """
+        base_score = self.calculate_similarity(subject, comp, renovation_year)
+        
+        # Date Proximity Penalty
+        import datetime
+        try:
+            val_dt = datetime.datetime.strptime(valuation_date, "%Y-%m-%d").date()
+            sale_dt = datetime.datetime.strptime(comp.get('sale_date', valuation_date), "%Y-%m-%d").date()
+        except:
+            val_dt = datetime.date(2024, 7, 1)
+            sale_dt = val_dt
+            
+        months_diff = abs((val_dt.year - sale_dt.year) * 12 + (val_dt.month - sale_dt.month))
+        
+        # Deduct 2 points for every month beyond the ideal 12-month window
+        date_penalty = 0
+        if months_diff > 12:
+            date_penalty = min(30, (months_diff - 12) * 2)
+            
+        final_score = max(0, base_score - date_penalty)
+        
+        if final_score >= 85: return "A"
+        if final_score >= 70: return "B"
+        if final_score >= 50: return "C"
+        return "F"
+
     def calculate_valuation(self, subject, comps, adjs=None, renovation_year=None,
-                            best_n: int = 5, condition_factor: float = 1.0):
+                            best_n: int = 5, condition_factor: float = 1.0, enforce_selection=False):
         """Sales-comparison valuation with median+IQR outlier filter and a
         best-N selection. Returns a rich result dict (not just market_value)
         so callers can show defensible breakdowns.
@@ -555,6 +596,11 @@ class TaxGrieveCore:
         for comp in comps:
             if comp.get('status') == 'REJECTED':
                 continue
+            
+            # PHASE 2 ENFORCEMENT: If enforcing selection, skip unselected comps
+            if enforce_selection and not comp.get('is_selected'):
+                continue
+
             adj_price = get_val(comp, 'sale_price', 0)
             if adj_price == 0:
                 continue
@@ -577,6 +623,8 @@ class TaxGrieveCore:
             raw_results.append({
                 'address': comp['address'], 'sale_price': comp['sale_price'],
                 'reconciled_value': reconciled, 'similarity_score': score,
+                'grade': comp.get('grade', 'C'),
+                'is_selected': comp.get('is_selected', 0),
                 'adjustments': {
                     'gla': gla_adj, 'acreage': acre_adj, 'bath': bath_adj,
                     'bed': bed_adj, 'age': age_adj,
@@ -585,6 +633,7 @@ class TaxGrieveCore:
                 'status': comp.get('status', 'VERIFIED'),
                 'assessment_2026': comp.get('assessment_2026', 0),
                 'assessment_2025': comp.get('assessment_2025', 0),
+                'distance_miles': comp.get('distance_miles'),
                 'sqft': comp.get('sqft', 0),
                 'year_built': comp.get('year_built', 0),
                 'bedrooms': comp.get('bedrooms', 0),

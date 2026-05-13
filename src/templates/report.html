@@ -120,15 +120,14 @@
         <div><strong>Property class:</strong> {{ subject.property_class or 'N/A' }}</div>
     </div>
 
-    <h2>Comparable Sales ({{ used_count }} used of {{ considered_count }} considered)</h2>
+    <h2>Comparable Sales ({{ used_count }} curated and selected)</h2>
     <table>
         <thead>
             <tr>
                 <th>Comp Address</th>
-                <th>Similarity</th>
+                <th>Similarity Grade</th>
                 <th>Sale Price</th>
                 <th>Adjusted Value</th>
-                <th>Action</th>
             </tr>
         </thead>
         <tbody>
@@ -136,7 +135,7 @@
             <tr id="row-{{ comp.zpid or loop.index }}" class="{% if comp.used %}row-used{% endif %} {% if comp.is_outlier %}row-outlier{% endif %}">
                 <td>
                     <b>{{ comp.address }}</b>
-                    {% if comp.used %}<span class="badge badge-used">USED</span>{% elif comp.is_outlier %}<span class="badge badge-outlier">OUTLIER</span>{% else %}<span class="badge badge-unused">CONSIDERED</span>{% endif %}
+                    {% if comp.used %}<span class="badge badge-used">USED</span>{% elif comp.is_outlier %}<span class="badge badge-outlier">OUTLIER</span>{% endif %}
                     <br>
                     <details>
                         <summary>Details & adjustments</summary>
@@ -146,7 +145,6 @@
                             <span><b>Beds/Baths:</b> {{ comp.bedrooms }}/{{ comp.bathrooms }}</span>
                             <span><b>Acreage:</b> {{ "{:.2f}".format(comp.acreage) if comp.acreage else 'N/A' }}</span>
                             <span><b>Sale date:</b> {{ comp.sale_date or 'N/A' }}</span>
-                            <span><b>Status:</b> {{ comp.status or 'N/A' }}</span>
                         </div>
                         <div style="margin-top:8px; font-size: 12px;">
                             <b>Adjustments applied:</b>
@@ -159,16 +157,11 @@
                     </details>
                 </td>
                 <td>
-                    <div style="width: 100%; background: #ecf0f1; height: 8px; border-radius: 4px;">
-                        <div style="width: {{ comp.similarity_score }}%; background: {{ '#27ae60' if comp.similarity_score > 60 else ('#f39c12' if comp.similarity_score > 35 else '#bdc3c7') }}; height: 100%; border-radius: 4px;"></div>
-                    </div>
-                    <small>{{ comp.similarity_score }}%</small>
+                    <div style="font-weight: bold; font-size: 16px;">Grade: {{ comp.grade }}</div>
+                    <small>Score: {{ comp.similarity_score }}%</small>
                 </td>
                 <td>${{ "{:,.0f}".format(comp.sale_price) }}</td>
                 <td><strong>${{ "{:,.0f}".format(comp.reconciled_value) }}</strong></td>
-                <td>
-                    <button onclick="rejectComp('{{ comp.address }}', '{{ comp.zpid or '' }}', 'row-{{ comp.zpid or loop.index }}')" style="background: #e74c3c; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;">Reject</button>
-                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -248,20 +241,6 @@
         const el = document.getElementById(id);
         if (el.style.display === 'block') el.style.display = 'none';
         else el.style.display = 'block';
-    }
-    function rejectComp(address, zpid, rowId) {
-        if (!confirm("Remove " + address + " from this report?")) return;
-        const fd = new FormData();
-        fd.append('property_id', '{{ subject_id }}');
-        fd.append('address', address);
-        if (zpid) fd.append('zpid', zpid);
-        fetch('/reject_comp', { method: 'POST', body: fd }).then(() => {
-            const row = document.getElementById(rowId);
-            row.style.opacity = '0.3';
-            row.style.textDecoration = 'line-through';
-            row.querySelector('button').disabled = true;
-            row.querySelector('button').innerText = 'Rejected';
-        });
     }
     // Lazy-load BAR filing info
     (function loadBAR() {

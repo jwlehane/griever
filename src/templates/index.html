@@ -360,9 +360,17 @@
         }
 
         function handleUpdate(data) {
+            if (data.status === 'render_ui') {
+                document.body.innerHTML = data.html;
+                if (controller) controller.abort(); // Stop listening
+                return;
+            }
+
             const log = document.getElementById('log');
             const status = document.getElementById('status-msg');
             const tableBody = document.getElementById('live-table-body');
+            
+            if (!log || !status || !tableBody) return; // Prevent errors if DOM changed
 
             if (data.status === 'info' || data.status === 'searching') {
                 if (data.subject_id) currentSubjectId = data.subject_id;
@@ -418,8 +426,6 @@
             } else if (data.status === 'no_comps') {
                 status.innerHTML = "No Comps Found Automatically";
                 showManualForm(data.subject_id);
-            } else if (data.status === 'finished') {
-                document.body.innerHTML = data.html;
             }
             log.scrollTop = log.scrollHeight;
         }
@@ -443,6 +449,70 @@
                     row.remove();
                 });
         }
+
+        // Curation phase functions
+        function toggleSelect(idx, subjectId, zpid, address) {
+            const btn = document.getElementById(`sel-${idx}`);
+            const isSelected = btn.classList.contains('selected');
+            const endpoint = isSelected ? '/unselect_comp' : '/select_comp';
+            
+            const formData = new FormData();
+            formData.append('property_id', subjectId);
+            if (zpid && zpid !== 'None') formData.append('zpid', zpid);
+            formData.append('address', address);
+
+            fetch(endpoint, { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if(data.status === 'success') {
+                        if (isSelected) {
+                            btn.classList.remove('selected');
+                            btn.innerText = 'Select';
+                        } else {
+                            btn.classList.add('selected');
+                            btn.innerText = 'Selected';
+                        }
+                    }
+                });
+        }
+
+        function openRejectModal(idx, subjectId, zpid, address) {
+            document.getElementById('rejRow').value = idx;
+            document.getElementById('rejSubjId').value = subjectId;
+            document.getElementById('rejZpid').value = zpid;
+            document.getElementById('rejAddr').value = address;
+            document.getElementById('rejectModal').style.display = 'block';
+        }
+
+        function confirmReject() {
+            const idx = document.getElementById('rejRow').value;
+            const formData = new FormData();
+            formData.append('property_id', document.getElementById('rejSubjId').value);
+            formData.append('address', document.getElementById('rejAddr').value);
+            const zpid = document.getElementById('rejZpid').value;
+            if (zpid && zpid !== 'None') formData.append('zpid', zpid);
+            formData.append('reason', document.getElementById('rejectReason').value);
+
+            fetch('/reject_comp', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if(data.status === 'success') {
+                        document.getElementById(`row-${idx}`).style.display = 'none';
+                        document.getElementById('rejectModal').style.display = 'none';
+                    }
+                });
+        }
+
+        // Event delegation for dynamically added form
+        document.addEventListener('submit', function(e) {
+            if (e.target && e.target.id === 'finalize-form') {
+                const selectedCount = document.querySelectorAll('.btn-select.selected').length;
+                if (selectedCount < 3) {
+                    e.preventDefault();
+                    alert("Please select at least 3 comps to finalize your valuation.");
+                }
+            }
+        });
 
         function showManualForm(subjectId) {
             document.getElementById('manual-entry').innerHTML = `

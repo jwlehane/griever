@@ -33,7 +33,7 @@ _ULSTER_ZIPS_AC = {
     "12453","12456","12457","12458","12461","12464","12465","12466","12471",
     "12472","12474","12477","12480","12481","12483","12484","12486","12487",
     "12489","12491","12493","12494","12495","12498","12515","12525","12528",
-    "12547","12548","12549","12561","12566","12575","12589",
+    "12547","12548","12548","12549","12561","12566","12575","12589",
 }
 
 # Tiny LRU-style cache for autocomplete queries.
@@ -174,21 +174,95 @@ async def generate_report(
     subject_id: int = Form(None),
     renovation_year: int = Form(None),
     skip_discovery: bool = Form(False),
-    condition: str = Form("average"),  # below / average / above / renovated
+    finalize: bool = Form(False), 
+    condition: str = Form("average"),
 ):
-    # Capture outer scope values for the closure
     init_subject_id = subject_id
     init_address = address
     init_renov = renovation_year
     init_skip = skip_discovery
+    init_finalize = finalize
     init_condition = condition
 
-    async def event_generator():
-        # Use a local subject_id variable to avoid UnboundLocalError
-        active_subject_id = init_subject_id
-        
+    # --- DIRECT HTML RESPONSE (FINALIZATION PHASE) ---
+    if init_finalize:
         try:
-            # Safety: If active_subject_id is missing but address is present, re-identify
+            active_subject_id = init_subject_id
+            if not active_subject_id and init_address:
+                subject_profile = core.get_subject_profile(init_address.strip())
+                if subject_profile:
+                    active_subject_id = core.ensure_property(subject_profile)
+                    
+            if not active_subject_id:
+                return HTMLResponse("Property session lost. Please search again.", status_code=400)
+
+            conn = sqlite3.connect('grievance_data.db')
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM properties WHERE id = ?", (active_subject_id,))
+            row = cursor.fetchone()
+            if not row:
+                conn.close()
+                return HTMLResponse("Property not found in database.", status_code=404)
+            subject = dict(row)
+            
+            cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED' AND is_selected = 1", (active_subject_id,))
+            comps = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+            if not comps:
+                return HTMLResponse("No comps selected. Please select at least 3 comps.", status_code=400)
+
+            condition_factors = {"below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20}
+            condition_factor = condition_factors.get((init_condition or "average").lower(), 1.0)
+
+            valuation = core.calculate_valuation(
+                subject, comps,
+                renovation_year=init_renov,
+                condition_factor=condition_factor,
+                enforce_selection=True
+            )
+            
+            from app.equalization import get_rate as _er_rate, implied_market_value
+            er = _er_rate(subject.get('sbl')) 
+            current_av = subject.get('assessment_2026') or subject.get('assessment_2025') or 0
+            implied_mv = implied_market_value(current_av, subject.get('sbl')) if current_av else None
+
+            if implied_mv:
+                reduction_full = max(0.0, float(implied_mv) - float(valuation["market_value"]))
+                reduction_av = reduction_full * (er / 100.0) if er else reduction_full
+            else:
+                reduction_full = max(0.0, float(current_av) - float(valuation["market_value"]))
+                reduction_av = reduction_full
+
+            html_content = templates.get_template("report.html").render({
+                "request": request,
+                "subject": subject,
+                "subject_id": active_subject_id,
+                "comps": [c for c in valuation["comps"] if c.get('status') != 'REJECTED'],
+                "market_value": valuation["market_value"],
+                "range_low": valuation["range_low"],
+                "range_high": valuation["range_high"],
+                "reduction": reduction_av,
+                "reduction_full": reduction_full,
+                "renovation_year": init_renov,
+                "current_av": current_av,
+                "equalization_rate": er,
+                "implied_market_value": implied_mv,
+                "used_count": valuation["used_count"],
+                "considered_count": valuation["considered_count"],
+                "adjustments_used": valuation["adjustments_used"],
+                "condition": init_condition,
+            })
+            return HTMLResponse(html_content)
+        except Exception as e:
+            traceback.print_exc()
+            return HTMLResponse(f"System error: {str(e)}", status_code=500)
+
+    # --- STREAMING RESPONSE (DISCOVERY & CURATION PHASE) ---
+    async def event_generator():
+        active_subject_id = init_subject_id
+        try:
             if not active_subject_id and init_address:
                 subject_profile = core.get_subject_profile(init_address.strip())
                 if subject_profile:
@@ -198,7 +272,6 @@ async def generate_report(
                 yield f"data: {json.dumps({'status': 'error', 'message': 'Property session lost. Please search again.'})}\n\n"
                 return
 
-            # Fetch subject from DB
             conn = sqlite3.connect('grievance_data.db')
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -212,28 +285,16 @@ async def generate_report(
 
             if not init_skip:
                 subject_name = subject["address"]
-                info_payload = json.dumps({'status': 'info', 'message': f'Starting discovery for {subject_name}...', 'subject_id': active_subject_id})
-                yield f"data: {info_payload}\n\n"
+                yield f"data: {json.dumps({'status': 'info', 'message': f'Starting discovery for {subject_name}...', 'subject_id': active_subject_id})}\n\n"
                 
-                # 2. Start Live Discovery Generator
-                all_live_comps = []
-                # Run the generator in a way that doesn't block the event loop
-                def get_updates():
-                    return list(core.discover_comps_live(subject, active_subject_id))
-
-                # Since discover_comps_live is a generator, we iterate through it
-                # We'll keep it simple for now but use a shorter sleep
                 for update in core.discover_comps_live(subject, active_subject_id):
                     yield f"data: {json.dumps(update)}\n\n"
                     if update['status'] == 'complete':
-                        all_live_comps = update.get('comps', [])
-                        break # Generator is done
+                        break 
                     await asyncio.sleep(0.001)
+                
+                yield f"data: {json.dumps({'status': 'info', 'message': 'Discovery complete. Preparing curation dashboard...'})}\n\n"
 
-            else:
-                yield f"data: {json.dumps({'status': 'info', 'message': 'Generating report from existing comps...'})}\n\n"
-
-            # 3. Finalize
             conn = sqlite3.connect('grievance_data.db')
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -245,78 +306,32 @@ async def generate_report(
                 yield f"data: {json.dumps({'status': 'no_comps', 'message': 'No matching sales found.', 'subject_id': active_subject_id})}\n\n"
                 return
 
-            # 4. Calculate Valuation (median+IQR, best-N, per-town adjustments)
-            condition_factors = {
-                "below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20,
-            }
+            condition_factors = {"below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20}
             condition_factor = condition_factors.get((init_condition or "average").lower(), 1.0)
 
             valuation = core.calculate_valuation(
                 subject, comps,
                 renovation_year=init_renov,
                 condition_factor=condition_factor,
+                enforce_selection=False
             )
-            market_value = valuation["market_value"]
-            range_low = valuation["range_low"]
-            range_high = valuation["range_high"]
-            adjusted_comps = valuation["comps"]
-            adjustments_used = valuation["adjustments_used"]
-            used_count = valuation["used_count"]
-            considered_count = valuation["considered_count"]
 
-            # Equalization-rate aware comparison
-            from app.equalization import get_rate as _er_rate, implied_market_value
-            er = _er_rate(subject.get('sbl'))  # percent
-            current_av = subject.get('assessment_2026') or subject.get('assessment_2025') or 0
-            implied_mv = implied_market_value(current_av, subject.get('sbl')) if current_av else None
-
-            # Compare comp-derived market value against implied (full) market
-            # value from the assessment. A grievance is warranted when
-            # market_value < implied_mv (i.e., the AV implies your house is
-            # worth more than the market says).
-            if implied_mv:
-                reduction_full = max(0.0, float(implied_mv) - float(market_value))
-                # Translate full-market-value reduction back to assessed value
-                # space (what the BAR actually changes on the roll).
-                reduction_av = reduction_full * (er / 100.0) if er else reduction_full
-            else:
-                # Fallback for unknown ER: assume 100% (legacy behavior).
-                reduction_full = max(0.0, float(current_av) - float(market_value))
-                reduction_av = reduction_full
-
-            # 5. Render final HTML
-            html_content = templates.get_template("report.html").render({
+            html_content = templates.get_template("curation.html").render({
                 "request": request,
                 "subject": subject,
                 "subject_id": active_subject_id,
-                "comps": [c for c in adjusted_comps if c.get('status') != 'REJECTED'],
-                "market_value": market_value,
-                "range_low": range_low,
-                "range_high": range_high,
-                "reduction": reduction_av,
-                "reduction_full": reduction_full,
+                "comps": [c for c in valuation["comps"] if c.get('status') != 'REJECTED'],
                 "renovation_year": init_renov,
-                "current_av": current_av,
-                "equalization_rate": er,
-                "implied_market_value": implied_mv,
-                "used_count": used_count,
-                "considered_count": considered_count,
-                "adjustments_used": adjustments_used,
                 "condition": init_condition,
             })
             
-            yield f"data: {json.dumps({'status': 'finished', 'html': html_content})}\n\n"
+            payload = json.dumps({"status": "render_ui", "html": html_content})
+            yield f"data: {payload}\n\n"
 
         except Exception as e:
-            import traceback
             traceback.print_exc()
-            error_ctx = {
-                "subject_id": active_subject_id, 
-                "phase": "streaming_report",
-                "subject_data": str(subject) if 'subject' in locals() else "Not loaded"
-            }
-            send_error_report(e, error_ctx)
-            yield f"data: {json.dumps({'status': 'error', 'message': f'Internal error: {str(e)}'})}\n\n"
+            await send_error_report(str(e), traceback.format_exc())
+            yield f"data: {json.dumps({'status': 'error', 'message': f'System error: {str(e)}'})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -324,8 +339,6 @@ async def generate_report(
 async def add_comp(request: Request, property_id: int = Form(...), address: str = Form(...), price: float = Form(...)):
     success = core.add_manual_comp(property_id, address, price)
     if success:
-        # Look up subject address so /report can re-find it without depending
-        # on the user's prior session and so skip_discovery actually skips.
         conn = sqlite3.connect('grievance_data.db')
         cursor = conn.cursor()
         cursor.execute("SELECT address FROM properties WHERE id = ?", (property_id,))
@@ -349,12 +362,6 @@ async def add_comp(request: Request, property_id: int = Form(...), address: str 
         return HTMLResponse("Failed to verify address on County API. Check spelling.")
 
 def _build_report_context(subject_id: int, renovation_year: int = None, condition: str = "average"):
-    """Common context builder used by /report rendering and PDF endpoints.
-
-    Loads subject + comps from DB, runs valuation, returns the same dict
-    shape we hand to the Jinja template. Raises HTTPException via FastAPI
-    callers when subject is missing.
-    """
     conn = sqlite3.connect('grievance_data.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -364,8 +371,9 @@ def _build_report_context(subject_id: int, renovation_year: int = None, conditio
         conn.close()
         return None
     subject = dict(row)
+    # FOR PDF: We only use SELECTED comps
     cursor.execute(
-        "SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED'",
+        "SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED' AND is_selected = 1",
         (subject_id,),
     )
     comps = [dict(r) for r in cursor.fetchall()]
@@ -376,6 +384,7 @@ def _build_report_context(subject_id: int, renovation_year: int = None, conditio
         subject, comps,
         renovation_year=renovation_year,
         condition_factor=condition_factors.get((condition or "average").lower(), 1.0),
+        enforce_selection=True
     )
 
     from app.equalization import get_rate as _er_rate, implied_market_value
@@ -439,7 +448,6 @@ async def grievance_methodology(subject_id: int, renovation_year: int = None, co
 
 @app.get("/grievance/package.zip")
 async def grievance_package(subject_id: int, renovation_year: int = None, condition: str = "average"):
-    """Bundle: RP-524 + methodology + cover letter as a single ZIP."""
     from fastapi.responses import Response
     from app.pdf_gen import render_rp524, render_methodology
     import zipfile, io
@@ -451,7 +459,6 @@ async def grievance_package(subject_id: int, renovation_year: int = None, condit
 
     safe = (ctx["subject"].get("address") or "subject").replace("/", "-").replace(" ", "_")
 
-    # Cover letter (plain text — easy to edit)
     bar = ctx.get("bar_info") or {}
     cover = (
         f"To: {bar.get('municipality') or 'The Board of Assessment Review'}\n"
@@ -497,7 +504,6 @@ async def grievance_package(subject_id: int, renovation_year: int = None, condit
 
 @app.get("/bar_info")
 async def bar_info(subject_id: int):
-    """Return Board of Assessment Review contact + Grievance Day for a subject."""
     from app.bar_info import get_bar
     conn = sqlite3.connect('grievance_data.db')
     conn.row_factory = sqlite3.Row
@@ -516,23 +522,44 @@ async def bar_info(subject_id: int):
     return JSONResponse(info)
 
 
-@app.post("/reject_comp")
-async def reject_comp(request: Request, property_id: int = Form(...), address: str = Form(...), zpid: str = Form(None)):
+@app.post("/select_comp")
+async def select_comp(property_id: int = Form(...), zpid: str = Form(None), address: str = Form(None)):
     conn = sqlite3.connect('grievance_data.db')
     cursor = conn.cursor()
     if zpid:
-        cursor.execute("UPDATE sales_comps SET status = 'REJECTED' WHERE target_property_id = ? AND zpid = ?", (property_id, zpid))
+        cursor.execute("UPDATE sales_comps SET is_selected = 1 WHERE target_property_id = ? AND zpid = ?", (property_id, zpid))
     else:
-        cursor.execute("UPDATE sales_comps SET status = 'REJECTED' WHERE target_property_id = ? AND address = ?", (property_id, address))
+        cursor.execute("UPDATE sales_comps SET is_selected = 1 WHERE target_property_id = ? AND address = ?", (property_id, address))
     conn.commit()
     conn.close()
-    return HTMLResponse("""
-        <div style="font-family:sans-serif; text-align:center; padding:50px;">
-            <h2>Comp Rejected</h2>
-            <p>This sale will no longer be used in your valuation calculations.</p>
-            <button onclick="window.history.back()" style="padding:10px 20px; background:#34495e; color:white; border:none; border-radius:4px; cursor:pointer;">Back</button>
-        </div>
-    """)
+    return {"status": "success"}
+
+
+@app.post("/unselect_comp")
+async def unselect_comp(property_id: int = Form(...), zpid: str = Form(None), address: str = Form(None)):
+    conn = sqlite3.connect('grievance_data.db')
+    cursor = conn.cursor()
+    if zpid:
+        cursor.execute("UPDATE sales_comps SET is_selected = 0 WHERE target_property_id = ? AND zpid = ?", (property_id, zpid))
+    else:
+        cursor.execute("UPDATE sales_comps SET is_selected = 0 WHERE target_property_id = ? AND address = ?", (property_id, address))
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
+
+
+@app.post("/reject_comp")
+async def reject_comp(request: Request, property_id: int = Form(...), address: str = Form(...), zpid: str = Form(None), reason: str = Form(None)):
+    conn = sqlite3.connect('grievance_data.db')
+    cursor = conn.cursor()
+    if zpid:
+        cursor.execute("UPDATE sales_comps SET status = 'REJECTED', rejection_reason = ? WHERE target_property_id = ? AND zpid = ?", (reason, property_id, zpid))
+    else:
+        cursor.execute("UPDATE sales_comps SET status = 'REJECTED', rejection_reason = ? WHERE target_property_id = ? AND address = ?", (reason, property_id, address))
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
+
 
 if __name__ == "__main__":
     import uvicorn
