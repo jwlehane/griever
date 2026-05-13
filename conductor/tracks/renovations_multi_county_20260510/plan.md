@@ -20,3 +20,6 @@
 ## Phase 4: Validation
 - [x] Task: Add unit tests for the `CountyFactory` and `effective_age` math.
 - [x] Task: Manually verify the "Error Report" email functionality by triggering a mock failure. (Console logs verified).
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions (property search directional prefixes and discovery stall fixes) 91f0111
