@@ -224,10 +224,10 @@ async def generate_report(
                 # Since discover_comps_live is a generator, we iterate through it
                 # We'll keep it simple for now but use a shorter sleep
                 for update in core.discover_comps_live(subject, active_subject_id):
+                    yield f"data: {json.dumps(update)}\n\n"
                     if update['status'] == 'complete':
-                        all_live_comps = update['comps']
-                    else:
-                        yield f"data: {json.dumps(update)}\n\n"
+                        all_live_comps = update.get('comps', [])
+                        break # Generator is done
                     await asyncio.sleep(0.001)
 
             else:

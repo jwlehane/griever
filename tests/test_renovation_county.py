@@ -41,11 +41,11 @@ def test_valuation_with_renovation():
     }]
     
     # Without renovation, reconciled should be 500,000
-    val_none, results_none = core.calculate_valuation(subject, comps)
-    assert val_none == 500000
+    res_none = core.calculate_valuation(subject, comps)
+    assert res_none["market_value"] == 500000
     
     # With renovation in 2010, effective year is 1980.
     # Subject (1980) vs Comp (1950) = 30 year difference.
     # Adjustment = (1980 - 1950) * 1000 = +30,000
-    val_renov, results_renov = core.calculate_valuation(subject, comps, renovation_year=2010)
-    assert results_renov[0]['reconciled_value'] == 530000
+    res_renov = core.calculate_valuation(subject, comps, renovation_year=2010)
+    assert res_renov["comps"][0]['reconciled_value'] == 530000

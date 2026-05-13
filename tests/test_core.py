@@ -22,20 +22,21 @@ def test_valuation_math_basic():
     
     # Comp is identical to subject
     comps = [{
-        'address': 'Comp 1', 
-        'sale_price': 500000, 
-        'sqft': 2000, 
-        'acreage': 1.0, 
-        'bathrooms': 2.0, 
-        'bedrooms': 3, 
+        'address': 'Comp 1',
+        'sale_price': 500000,
+        'sqft': 2000,
+        'acreage': 1.0,
+        'bathrooms': 2.0,
+        'bedrooms': 3,
         'year_built': 2000
     }]
-    
-    market_value, results = core.calculate_valuation(subject, comps)
-    
+
+    result = core.calculate_valuation(subject, comps)
+    market_value = result["market_value"]
     assert market_value == 500000
-    assert results[0]['reconciled_value'] == 500000
-    assert all(adj == 0 for adj in results[0]['adjustments'].values())
+    assert result["used_count"] == 1
+    assert result["comps"][0]['reconciled_value'] == 500000
+    assert all(adj == 0 for adj in result["comps"][0]['adjustments'].values())
 
 def test_valuation_adjustments():
     """Verify that adjustments are applied correctly."""
@@ -61,7 +62,8 @@ def test_valuation_adjustments():
     
     # $150 per sqft adjustment (default)
     # (2500 - 2000) * 150 = 500 * 150 = 75,000
-    market_value, results = core.calculate_valuation(subject, comps)
-    
+    result = core.calculate_valuation(subject, comps)
+    market_value = result["market_value"]
     assert market_value == 575000
-    assert results[0]['adjustments']['gla'] == 75000
+    assert result["used_count"] == 1
+    assert result["comps"][0]['adjustments']['gla'] == 75000

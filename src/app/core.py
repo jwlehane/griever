@@ -332,7 +332,9 @@ class TaxGrieveCore:
             yield {"status": "found", "count": len(raw_comps), "message": f"Found {len(raw_comps)} listings. Resuming/Filtering..."}
 
             enriched_comps = []
-            for i, rc in enumerate(raw_comps[:40]):
+            # We process ALL raw comps returned by the search (RapidAPI usually limits to 40 anyway)
+            total_raw = len(raw_comps)
+            for i, rc in enumerate(raw_comps):
                 zpid = str(rc.get('zpid', rc.get('id', '')))
                 
                 # Check if already processed
@@ -365,7 +367,7 @@ class TaxGrieveCore:
                 comp_identifier = rc.get('parcelNumber', rc.get('resoFacts', {}).get('parcelNumber'))
                 official_data = None
                 
-                yield {"status": "verifying", "address": full_addr, "current": i+1, "total": min(len(raw_comps), 40), "message": f"Verifying {full_addr}..."}
+                yield {"status": "verifying", "address": full_addr, "current": i+1, "total": total_raw, "message": f"Verifying {full_addr}..."}
 
                 # Verification policy: only do the cheap path (identifier-based
                 # lookup) when the source supplies a parcel number that matches
@@ -668,13 +670,15 @@ class TaxGrieveCore:
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS sales_comps 
-                        (id INTEGER PRIMARY KEY, target_property_id INTEGER, address TEXT, sbl TEXT, 
-                         sale_price REAL, sale_date TEXT, sqft REAL, acreage REAL, bedrooms REAL, 
-                         bathrooms REAL, year_built INTEGER, zpid TEXT, status TEXT DEFAULT 'VERIFIED')''')
-        cursor.execute('''INSERT INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, status, assessment_2026) 
+        cursor.execute('''CREATE TABLE IF NOT EXISTS sales_comps
+                        (id INTEGER PRIMARY KEY, target_property_id INTEGER, address TEXT, sbl TEXT,
+                         sale_price REAL, sale_date TEXT, sqft REAL, acreage REAL, bedrooms REAL,
+                         bathrooms REAL, year_built INTEGER, zpid TEXT, status TEXT DEFAULT 'VERIFIED',
+                         similarity_score REAL, is_outlier INTEGER DEFAULT 0,
+                         assessment_2026 REAL, assessment_2025 REAL, distance_miles REAL)''')
+        cursor.execute('''INSERT INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, status, assessment_2026)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?)''',
-                    (property_id, data['address'], data['sbl'], price, '2025-01-01', data['sqft'], data['acreage'], 
+                    (property_id, data['address'], data['sbl'], price, '2025-01-01', data['sqft'], data['acreage'],
                      data['bedrooms'], data['bathrooms'], data['year_built'], data.get('assessment_2026', 0)))
         conn.commit()
         conn.close()

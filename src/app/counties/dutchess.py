@@ -57,36 +57,51 @@ class DutchessCounty(CountyInterface):
                 break
 
         predir = ""
-        if street_base.startswith("N "): predir, street_base = "N", street_base[2:]
-        elif street_base.startswith("S "): predir, street_base = "S", street_base[2:]
-        elif street_base.startswith("E "): predir, street_base = "E", street_base[2:]
-        elif street_base.startswith("W "): predir, street_base = "W", street_base[2:]
+        street_no_dir = street_base
+        if street_base.startswith("N "): 
+            predir, street_no_dir = "N", street_base[2:]
+        elif street_base.startswith("S "): 
+            predir, street_no_dir = "S", street_base[2:]
+        elif street_base.startswith("E "): 
+            predir, street_no_dir = "E", street_base[2:]
+        elif street_base.startswith("W "): 
+            predir, street_no_dir = "W", street_base[2:]
 
         # --- OPTIMIZED SWIS SELECTION ---
         swis_options = []
         
         # 1. If preferred_swis is provided (subject's town), ONLY check that.
-        # This is the most critical fix for the hang.
         if preferred_swis:
             swis_options = [preferred_swis]
         else:
             # 2. Check if input contains a specific town name
+            # Gather ALL matching SWIS codes (e.g. Rhinebeck has 135089 AND 135001)
             for code, name in self.swis_map.items():
                 if name.upper() in raw_input:
-                    swis_options = [code]
-                    break 
+                    swis_options.append(code)
             
             # 3. Last Resort: Search everything (only if no town info at all)
             if not swis_options:
                 swis_options = list(self.swis_map.keys())
 
-        street_options = [clean_street, street_base] if has_suffix else [clean_street]
+        # Street options should include:
+        # 1. The cleaned street (with 'N ', 'ST', etc. potentially still in it)
+        # 2. The street base (suffix removed)
+        # 3. If a predir was found, the street base WITHOUT the predir
+        street_options = [clean_street, street_base]
+        if street_no_dir != street_base:
+            street_options.append(street_no_dir)
+        
+        # Deduplicate while preserving order
+        seen = set()
+        street_options = [x for x in street_options if not (x in seen or seen.add(x))]
         
         print(f"DEBUG: Searching {number} {clean_street} in {len(swis_options)} towns...")
 
         for s in swis_options:
             town_name = self.swis_map.get(s, s)
             for st in street_options:
+                # Try with extracted predir
                 params = {'number': number, 'street': st.strip(), 'predir': predir, 'swis': s}
                 try:
                     # Low timeout for verified town searches
@@ -100,7 +115,22 @@ class DutchessCounty(CountyInterface):
                         print(f"  FOUND in {town_name}")
                         return res
                 except:
-                    continue
+                    pass
+                
+                # If predir was used and failed, also try WITHOUT predir for this street option
+                if predir:
+                    params_no_dir = {'number': number, 'street': st.strip(), 'swis': s}
+                    try:
+                        resp = self.session.get(f"{API_BASE_URL}/search_extract_addresses.asp", params=params_no_dir, headers=self.headers, timeout=5)
+                        resp.raise_for_status()
+                        data = resp.json()
+                        if data.get('success') and data.get('data'):
+                            res = data['data'][0]
+                            if 'parcelgrid' not in res and 'id' in res: res['parcelgrid'] = res['id']
+                            print(f"  FOUND in {town_name} (no predir)")
+                            return res
+                    except:
+                        pass
         print(f"  NOT FOUND")
         return None
 

@@ -31,21 +31,23 @@ def setup_test_db(db_path):
     cursor.execute("""
         CREATE TABLE sales_comps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_property_id INTEGER,
             address TEXT NOT NULL,
             sbl TEXT,
-            sale_date TEXT,
             sale_price REAL,
+            sale_date TEXT,
             sqft REAL,
-            bedrooms INTEGER,
-            bathrooms REAL,
             acreage REAL,
-            distance_miles REAL,
-            reconciled_value REAL,
+            bedrooms REAL,
+            bathrooms REAL,
             year_built INTEGER,
-            target_property_id INTEGER,
-            source TEXT DEFAULT 'MANUAL',
+            zpid TEXT,
+            status TEXT DEFAULT 'VERIFIED',
             similarity_score REAL DEFAULT 0,
-            is_outlier INTEGER DEFAULT 0
+            is_outlier INTEGER DEFAULT 0,
+            assessment_2026 REAL,
+            assessment_2025 REAL,
+            distance_miles REAL
         )
     """)
     conn.commit()
@@ -103,11 +105,12 @@ def test_full_pipeline_flow():
     comps = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    market_value, results = core.calculate_valuation(subject_data, comps)
+    result = core.calculate_valuation(subject_data, comps)
+    market_value = result["market_value"]
     
     assert market_value > 800000
-    assert len(results) == 1
-    assert results[0]['similarity_score'] > 90 # Should be very similar
+    assert result["used_count"] == 1
+    assert result["comps"][0]['similarity_score'] > 90 # Should be very similar
     
     # Cleanup
     if os.path.exists(db_path): os.remove(db_path)
