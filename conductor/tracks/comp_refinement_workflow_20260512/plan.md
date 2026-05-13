@@ -1,8 +1,8 @@
 # Implementation Plan: Comp Refinement Workflow & Documentation Sync
 
 ## Phase 1: Documentation & Product Alignment
-- [ ] Task: Update `grievance_mcp_design.md` to reflect current FastAPI + Multi-County architecture.
-- [ ] Task: Update `conductor/product.md` and `conductor/tech-stack.md` with PDF and Ulster support details.
+- [x] Task: Update `grievance_mcp_design.md` to reflect current FastAPI + Multi-County architecture.
+- [x] Task: Update `conductor/product.md` and `conductor/tech-stack.md` with PDF and Ulster support details.
 
 ## Phase 2: Enhanced Comp Management (Backend)
 - [ ] Task: Add `rejection_reason` and `is_pinned` columns to `sales_comps` table in `src/app/core.py`.
