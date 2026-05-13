@@ -1,0 +1,12 @@
+{
+  "id": "comp_refinement_workflow_20260512",
+  "title": "Comp Refinement Workflow & Documentation Sync",
+  "status": "in-progress",
+  "created_at": "2026-05-12T18:30:00",
+  "phases": [
+    "Documentation Alignment",
+    "Backend Enhancements",
+    "UI Optimization",
+    "Validation"
+  ]
+}
