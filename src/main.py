@@ -176,6 +176,8 @@ async def generate_report(
     skip_discovery: bool = Form(False),
     finalize: bool = Form(False), 
     condition: str = Form("average"),
+    force_verify: bool = Form(False),
+    update_curation: bool = Form(False),
 ):
     init_subject_id = subject_id
     init_address = address
@@ -183,9 +185,11 @@ async def generate_report(
     init_skip = skip_discovery
     init_finalize = finalize
     init_condition = condition
+    init_force = force_verify
+    init_update_curation = update_curation
 
     # --- DIRECT HTML RESPONSE (FINALIZATION PHASE) ---
-    if init_finalize:
+    if init_finalize or init_update_curation:
         try:
             active_subject_id = init_subject_id
             if not active_subject_id and init_address:
@@ -206,12 +210,12 @@ async def generate_report(
                 return HTMLResponse("Property not found in database.", status_code=404)
             subject = dict(row)
             
-            cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED' AND is_selected = 1", (active_subject_id,))
+            cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED'" + (" AND is_selected = 1" if init_finalize else ""), (active_subject_id,))
             comps = [dict(r) for r in cursor.fetchall()]
             conn.close()
 
             if not comps:
-                return HTMLResponse("No comps selected. Please select at least 3 comps.", status_code=400)
+                return HTMLResponse("No comps found or selected.", status_code=400)
 
             condition_factors = {"below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20}
             condition_factor = condition_factors.get((init_condition or "average").lower(), 1.0)
@@ -220,9 +224,21 @@ async def generate_report(
                 subject, comps,
                 renovation_year=init_renov,
                 condition_factor=condition_factor,
-                enforce_selection=True
+                enforce_selection=init_finalize
             )
             
+            if init_update_curation:
+                sorted_comps = sorted([c for c in valuation["comps"] if c.get('status') != 'REJECTED'], key=lambda x: x.get('similarity_score', 0), reverse=True)
+                html_content = templates.get_template("curation.html").render({
+                    "request": request,
+                    "subject": subject,
+                    "subject_id": active_subject_id,
+                    "comps": sorted_comps,
+                    "renovation_year": init_renov,
+                    "condition": init_condition,
+                })
+                return HTMLResponse(html_content)
+
             from app.equalization import get_rate as _er_rate, implied_market_value
             er = _er_rate(subject.get('sbl')) 
             current_av = subject.get('assessment_2026') or subject.get('assessment_2025') or 0
@@ -287,7 +303,7 @@ async def generate_report(
                 subject_name = subject["address"]
                 yield f"data: {json.dumps({'status': 'info', 'message': f'Starting discovery for {subject_name}...', 'subject_id': active_subject_id})}\n\n"
                 
-                for update in core.discover_comps_live(subject, active_subject_id):
+                for update in core.discover_comps_live(subject, active_subject_id, force_verify=init_force):
                     yield f"data: {json.dumps(update)}\n\n"
                     if update['status'] == 'complete':
                         break 
@@ -316,11 +332,13 @@ async def generate_report(
                 enforce_selection=False
             )
 
+            sorted_comps = sorted([c for c in valuation["comps"] if c.get('status') != 'REJECTED'], key=lambda x: x.get('similarity_score', 0), reverse=True)
+
             html_content = templates.get_template("curation.html").render({
                 "request": request,
                 "subject": subject,
                 "subject_id": active_subject_id,
-                "comps": [c for c in valuation["comps"] if c.get('status') != 'REJECTED'],
+                "comps": sorted_comps,
                 "renovation_year": init_renov,
                 "condition": init_condition,
             })

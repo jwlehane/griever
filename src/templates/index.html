@@ -56,6 +56,12 @@
         .controls { display: flex; gap: 10px; margin-top: 20px; }
         .timer { font-weight: bold; color: #e67e22; }
         .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #bdc3c7; }
+        
+        .explainer { background: #e3f2fd; border-left: 4px solid #1565c0; padding: 10px 15px; margin-bottom: 20px; border-radius: 4px; font-size: 14px; }
+        .explainer summary { font-weight: bold; cursor: pointer; color: #1565c0; outline: none; list-style: none; }
+        .explainer summary::-webkit-details-marker { display: none; }
+        .explainer summary::before { content: "ℹ️ "; }
+        .explainer p { margin: 8px 0 0 0; color: #333; line-height: 1.4; }
     </style>
 </head>
 <body>
@@ -73,6 +79,11 @@
 
         <!-- Step 2: Verification Card -->
         <div id="verification-step">
+            <details class="explainer">
+                <summary>How Verification Works</summary>
+                <p>Review the details retrieved from the County Database to ensure this is the correct property. If the property has undergone major renovations not reflected in its age, enter the <b>Remodel Year</b> so the algorithm can calculate an effective age.</p>
+                <p>Checking <b>Force Deep Verification</b> forces the system to rigorously cross-reference every discovered comparable sale against the County Database. <i>Note: This process is slower and can take 2-3 minutes to complete.</i></p>
+            </details>
             <div class="card">
                 <div class="card-header" onclick="toggleDetails('subject-details')">
                     <h3 class="card-title" id="subject-addr-display">Property Found</h3>
@@ -91,6 +102,19 @@
                     </div>
                 </div>
             </div>
+            
+            <div style="margin-top: 15px; margin-bottom: 15px;">
+                <label style="font-size: 14px; color: #2c3e50;">
+                    <b>Renovation / Remodel Year (if applicable):</b>
+                    <input type="number" id="renov-year" placeholder="YYYY" style="width: 80px; padding: 5px; margin-left: 10px;" min="1900" max="2026">
+                </label>
+            </div>
+            
+            <div style="margin-top: 15px; margin-bottom: 15px;">
+                <label style="font-size: 14px; color: #2c3e50; cursor: pointer;">
+                    <input type="checkbox" id="force-verify-cb"> Force Deep Verification (Slower, but verifies all comps with County Database)
+                </label>
+            </div>
             <p style="font-size:14px; color:#e67e22; font-weight:bold;">Is this the correct property?</p>
             <div class="action-btns">
                 <button class="btn-confirm" onclick="startDiscovery()">Yes, Start Search</button>
@@ -99,6 +123,10 @@
         </div>
 
         <div id="progress" class="progress-box">
+            <details class="explainer">
+                <summary>Live Discovery Process</summary>
+                <p>The system is now querying live real estate APIs to find 40 recent sales in your area. As properties are found, they are streamed below. The system automatically filters out active listings and repairs missing data points (like square footage) in real-time.</p>
+            </details>
             <div id="status-msg" style="margin-bottom: 10px; font-weight: bold;">Preparing discovery...</div>
             <div class="controls">
                 <button id="stop-btn" class="btn-stop" onclick="stopAnalysis()">Stop Discovery</button>
@@ -327,6 +355,14 @@
             const formData = new FormData();
             formData.append('address', currentSubject.address);
             formData.append('subject_id', currentSubjectId);
+            
+            const renovYear = document.getElementById('renov-year').value;
+            if (renovYear) {
+                formData.append('renovation_year', renovYear);
+            }
+            
+            const forceVerify = document.getElementById('force-verify-cb').checked;
+            formData.append('force_verify', forceVerify);
             if (skipDiscovery) formData.append('skip_discovery', 'true');
 
             fetch('/report', {
@@ -336,17 +372,23 @@
             }).then(response => {
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
+                let buffer = '';
 
                 function read() {
                     reader.read().then(({ done, value }) => {
                         if (done) return;
-                        const chunk = decoder.decode(value);
-                        const lines = chunk.split('\n\n');
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n\n');
+                        buffer = lines.pop(); // Keep the last incomplete chunk in the buffer
                         
                         lines.forEach(line => {
                             if (line.startsWith('data: ')) {
-                                const data = JSON.parse(line.replace('data: ', ''));
-                                handleUpdate(data);
+                                try {
+                                    const data = JSON.parse(line.substring(6));
+                                    handleUpdate(data);
+                                } catch (e) {
+                                    console.error('Failed to parse JSON:', e, line);
+                                }
                             }
                         });
                         read();

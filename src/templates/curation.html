@@ -31,12 +31,23 @@
         .modal-content { background-color: white; margin: 15% auto; padding: 20px; border-radius: 8px; width: 400px; text-align: center; }
         .modal-content select { width: 100%; padding: 10px; margin: 15px 0; border: 1px solid #ddd; }
         .modal-content button { margin: 5px; }
+
+        .explainer { background: #e3f2fd; border-left: 4px solid #1565c0; padding: 10px 15px; margin-bottom: 20px; border-radius: 4px; font-size: 14px; }
+        .explainer summary { font-weight: bold; cursor: pointer; color: #1565c0; outline: none; list-style: none; }
+        .explainer summary::-webkit-details-marker { display: none; }
+        .explainer summary::before { content: "ℹ️ "; }
+        .explainer p { margin: 8px 0 0 0; color: #333; line-height: 1.4; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Phase 3: Curate Comparable Sales</h1>
-        <p>Review the discovered properties below. NYS requires sales to be <b>Arms-Length</b> and similar in size, age, and location. Select 3-5 of the best comps to finalize your valuation.</p>
+        <details class="explainer">
+            <summary>How Curation & Grading Works</summary>
+            <p>Review the discovered properties below. NYS requires sales to be <b>Arms-Length</b> and similar in size, age, and location. Select 3-5 of the best comps to finalize your valuation.</p>
+            <p><b>Match (%):</b> The algorithm grades each property (A, B, C, F) based on how similar its specs (Sqft, Age, Acreage) are to the subject, penalizing sales that are further away or sold outside the ideal 12-month window.</p>
+            <p><b>Adjusted Value:</b> This is the estimated value of your property <i>if</i> the comp's price was adjusted for the differences in square footage, age, and condition. You can tweak your property's <b>Condition</b> at the bottom to see how it dynamically affects these values.</p>
+        </details>
         
         <div class="card">
             <h3>Subject Property: {{ subject.address }}</h3>
@@ -44,23 +55,28 @@
         </div>
 
         <h2>Available Comps</h2>
-        <table>
+        <table id="compsTable">
             <thead>
                 <tr>
-                    <th>Grade</th>
-                    <th>Address</th>
-                    <th>Sale Price / Date</th>
+                    <th onclick="sortTable(0)" style="cursor:pointer">Match ↕</th>
+                    <th onclick="sortTable(1)" style="cursor:pointer">Address ↕</th>
+                    <th onclick="sortTable(2)" style="cursor:pointer">Sale Price & Date ↕</th>
                     <th>Specs</th>
+                    <th onclick="sortTable(4)" style="cursor:pointer">Adjusted Value ↕</th>
                     <th>Action</th>
                 </tr>
             </thead>
             <tbody>
                 {% for comp in comps %}
                 <tr id="row-{{ loop.index }}">
-                    <td><span class="grade grade-{{ comp.grade }}">{{ comp.grade }}</span></td>
+                    <td>
+                        <span class="grade grade-{{ comp.grade }}">{{ comp.grade }}</span><br>
+                        <small>{{ "%.1f"|format(comp.similarity_score) }}%</small>
+                    </td>
                     <td><b>{{ comp.address }}</b><br><small>{{ comp.distance_miles }} miles away</small></td>
                     <td>${{ "{:,.0f}".format(comp.sale_price) }}<br><small>{{ comp.sale_date }}</small></td>
                     <td><small>{{ comp.sqft }} sqft<br>{{ comp.bedrooms }}bd/{{ comp.bathrooms }}ba, Blt {{ comp.year_built }}</small></td>
+                    <td><b>${{ "{:,.0f}".format(comp.reconciled_value) }}</b></td>
                     <td>
                         <button class="btn-select" id="sel-{{ loop.index }}" onclick="toggleSelect({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">Select</button>
                         <button class="btn-reject" onclick="openRejectModal({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">Reject</button>
@@ -71,12 +87,27 @@
         </table>
 
         <form action="/report" method="POST" id="finalize-form">
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px;">
+                <h3 style="margin-top: 0;">Adjust Base Pricing</h3>
+                <label style="margin-right: 20px;">
+                    <b>Renovation Year:</b>
+                    <input type="number" id="curation-renov" name="renovation_year" value="{{ renovation_year or '' }}" placeholder="YYYY" style="width: 80px; padding: 5px; margin-left: 5px;" min="1900" max="2026" onchange="updatePricing()">
+                </label>
+                <label>
+                    <b>Subject Condition:</b>
+                    <select id="curation-cond" name="condition" style="padding: 5px; margin-left: 5px;" onchange="updatePricing()">
+                        <option value="average" {% if condition == 'average' %}selected{% endif %}>Average</option>
+                        <option value="below" {% if condition == 'below' %}selected{% endif %}>Below Average (-15%)</option>
+                        <option value="above" {% if condition == 'above' %}selected{% endif %}>Above Average (+10%)</option>
+                        <option value="renovated" {% if condition == 'renovated' %}selected{% endif %}>Newly Renovated (+20%)</option>
+                    </select>
+                </label>
+            </div>
+
             <input type="hidden" name="address" value="{{ subject.address }}">
             <input type="hidden" name="subject_id" value="{{ subject_id }}">
             <input type="hidden" name="skip_discovery" value="true">
             <input type="hidden" name="finalize" value="true">
-            <input type="hidden" name="renovation_year" value="{{ renovation_year or '' }}">
-            <input type="hidden" name="condition" value="{{ condition }}">
             
             <button type="submit" class="btn-finalize">Finalize Valuation</button>
         </form>
@@ -104,5 +135,72 @@
             </div>
         </div>
     </div>
+    
+    <script>
+        function sortTable(n) {
+            var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+            table = document.getElementById("compsTable");
+            switching = true;
+            dir = "desc"; 
+            while (switching) {
+                switching = false;
+                rows = table.rows;
+                for (i = 1; i < (rows.length - 1); i++) {
+                    shouldSwitch = false;
+                    x = rows[i].getElementsByTagName("TD")[n];
+                    y = rows[i + 1].getElementsByTagName("TD")[n];
+                    
+                    let xVal = x.innerText.replace(/[^0-9.-]+/g,"");
+                    let yVal = y.innerText.replace(/[^0-9.-]+/g,"");
+                    let cmpX = parseFloat(xVal) || x.innerHTML.toLowerCase();
+                    let cmpY = parseFloat(yVal) || y.innerHTML.toLowerCase();
+
+                    if (dir == "asc") {
+                        if (cmpX > cmpY) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    } else if (dir == "desc") {
+                        if (cmpX < cmpY) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    }
+                }
+                if (shouldSwitch) {
+                    rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                    switching = true;
+                    switchcount ++;
+                } else {
+                    if (switchcount == 0 && dir == "desc") {
+                        dir = "asc";
+                        switching = true;
+                    }
+                }
+            }
+        }
+
+        function updatePricing() {
+            const formData = new FormData();
+            formData.append('address', '{{ subject.address }}');
+            formData.append('subject_id', '{{ subject_id }}');
+            formData.append('update_curation', 'true');
+            formData.append('renovation_year', document.getElementById('curation-renov').value);
+            formData.append('condition', document.getElementById('curation-cond').value);
+            
+            // Show loading state on table
+            document.querySelector('table').style.opacity = '0.5';
+
+            fetch('/report', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.text())
+            .then(html => {
+                document.body.innerHTML = html;
+            })
+            .catch(error => console.error('Error updating pricing:', error));
+        }
+    </script>
 </body>
 </html>

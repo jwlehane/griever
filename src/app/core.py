@@ -71,8 +71,8 @@ class TaxGrieveCore:
         profile = county.get_full_rps_data(identifier)
         if not profile: return None
 
-        # 3. If building data is missing, recover via RapidAPI
-        if profile.get('sqft', 0) == 0 or profile.get('bedrooms', 0) == 0:
+        # 3. Recover missing building data and historical assessment via RapidAPI
+        if profile.get('sqft', 0) == 0 or profile.get('bedrooms', 0) == 0 or profile.get('assessment_2025', 0) == 0:
             try:
                 town = county.get_town_from_identifier(identifier)
                 cmd = ["bash", "tools/fetch_comps.sh", f"{profile['address']}, {town}, NY", "0", "99"]
@@ -81,10 +81,15 @@ class TaxGrieveCore:
                 if market_data:
                     md = market_data[0]
                     rf = md.get('resoFacts', {})
-                    profile['sqft'] = md.get('livingArea', md.get('area', profile.get('sqft', 0)))
-                    profile['bedrooms'] = md.get('bedrooms', md.get('beds', profile.get('bedrooms', 0)))
-                    profile['bathrooms'] = md.get('bathrooms', md.get('baths', profile.get('bathrooms', 0)))
-                    profile['year_built'] = md.get('yearBuilt', md.get('year_built', profile.get('year_built', 0)))
+                    if profile.get('sqft', 0) == 0:
+                        profile['sqft'] = md.get('livingArea', md.get('area', 0))
+                    if profile.get('bedrooms', 0) == 0:
+                        profile['bedrooms'] = md.get('bedrooms', md.get('beds', 0))
+                    if profile.get('bathrooms', 0) == 0:
+                        profile['bathrooms'] = md.get('bathrooms', md.get('baths', 0))
+                    if profile.get('year_built', 0) == 0:
+                        profile['year_built'] = md.get('yearBuilt', md.get('year_built', 0))
+                    
                     if profile.get('assessment_2025', 0) == 0:
                         profile['assessment_2025'] = rf.get('taxAssessedValue', md.get('taxAssessedValue', 0))
             except: pass
@@ -207,7 +212,7 @@ class TaxGrieveCore:
         conn.close()
         return row_id
 
-    def discover_comps_live(self, subject, subject_id):
+    def discover_comps_live(self, subject, subject_id, force_verify=False):
         """Streams comps from RapidAPI, verifies them, and persists to DB immediately."""
         # Ensure sales_comps schema is up to date BEFORE any early returns so
         # downstream SELECTs (in main.py) don't hit missing columns when the
@@ -383,12 +388,17 @@ class TaxGrieveCore:
                 try:
                     if comp_identifier:
                         official_data = county.get_full_rps_data(comp_identifier)
+                    elif force_verify:
+                        # Fallback to slow address search if forced
+                        search_res = county.search_address(full_addr)
+                        if search_res and search_res.get('parcelgrid'):
+                            official_data = county.get_full_rps_data(search_res.get('parcelgrid'))
                 except (CountyAPIError, Exception) as ve:
                     print(f"  verify skipped for {full_addr}: {ve}")
                     official_data = None
 
-                sqft = rc.get('livingArea', rc.get('area', 0))
-                acreage = rc.get('lotAreaValue', 0)
+                sqft = rc.get('livingArea') or rc.get('area') or 0
+                acreage = rc.get('lotAreaValue') or 0
                 if rc.get('lotAreaUnit') == 'sqft' and acreage:
                     acreage = round(acreage / 43560, 4)
                 sale_price = float(rc.get('price', 0)) if rc.get('price') else 0
@@ -428,6 +438,7 @@ class TaxGrieveCore:
                 year_built = rc.get('yearBuilt') or rc.get('year_built')
 
                 comp_obj = None
+                tax_av_2025 = rc.get('taxAssessedValue') or 0
                 if official_data and sale_price > 0:
                     comp_obj = {
                         'address': official_data['address'], 'sbl': official_data['sbl'],
@@ -438,6 +449,7 @@ class TaxGrieveCore:
                         'bathrooms': rc.get('bathrooms', official_data['bathrooms']),
                         'year_built': year_built or official_data['year_built'],
                         'assessment_2026': official_data.get('assessment_2026', 0),
+                        'assessment_2025': tax_av_2025,
                         'zpid': zpid, 'status': 'VERIFIED',
                         'distance_miles': distance_miles,
                     }
@@ -449,6 +461,7 @@ class TaxGrieveCore:
                         'bedrooms': rc.get('bedrooms', 0), 'bathrooms': rc.get('bathrooms', 0),
                         'year_built': year_built or 0,
                         'assessment_2026': 0,
+                        'assessment_2025': tax_av_2025,
                         'zpid': zpid, 'status': 'UNVERIFIED',
                         'distance_miles': distance_miles,
                     }
@@ -467,11 +480,11 @@ class TaxGrieveCore:
                         conn.commit()
                     
                     cursor.execute("""
-                        INSERT OR REPLACE INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, zpid, status, assessment_2026, distance_miles, grade, similarity_score, is_selected)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT OR REPLACE INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, zpid, status, assessment_2026, assessment_2025, distance_miles, grade, similarity_score, is_selected)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (subject_id, comp_obj['address'], comp_obj['sbl'], comp_obj['sale_price'], comp_obj['sale_date'],
                          comp_obj['sqft'], comp_obj['acreage'], comp_obj['bedrooms'], comp_obj['bathrooms'], comp_obj['year_built'],
-                         comp_obj['zpid'], comp_obj['status'], comp_obj.get('assessment_2026', 0), comp_obj.get('distance_miles'),
+                         comp_obj['zpid'], comp_obj['status'], comp_obj.get('assessment_2026', 0), comp_obj.get('assessment_2025', 0), comp_obj.get('distance_miles'),
                          comp_obj['grade'], comp_obj['similarity_score'], comp_obj['is_selected']))
                     conn.commit()
                     enriched_comps.append(comp_obj)
@@ -528,7 +541,7 @@ class TaxGrieveCore:
         score = sum(n * w for n, w in avail) / total_w * 100
         return round(score, 1)
 
-    def calculate_similarity_grade(self, subject, comp, renovation_year=None, valuation_date="2024-07-01"):
+    def calculate_similarity_grade(self, subject, comp, renovation_year=None, valuation_date="2025-07-01"):
         """
         Assigns a letter grade (A, B, C, F) based on similarity score and sale date proximity.
         NYS BARs prioritize sales within 12 months of the Valuation Date.
@@ -541,7 +554,7 @@ class TaxGrieveCore:
             val_dt = datetime.datetime.strptime(valuation_date, "%Y-%m-%d").date()
             sale_dt = datetime.datetime.strptime(comp.get('sale_date', valuation_date), "%Y-%m-%d").date()
         except:
-            val_dt = datetime.date(2024, 7, 1)
+            val_dt = datetime.date(2025, 7, 1)
             sale_dt = val_dt
             
         months_diff = abs((val_dt.year - sale_dt.year) * 12 + (val_dt.month - sale_dt.month))
