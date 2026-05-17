@@ -32,6 +32,33 @@ class TaxGrieveCore:
             pass
         return None, None, None
 
+    def _fetch_rapidapi_comps(self, location, beds_min, beds_max, status=None):
+        import requests
+        api_key = os.getenv("RAPIDAPI_KEY")
+        if not api_key:
+            return []
+        
+        url = "https://real-time-real-estate-data.p.rapidapi.com/search"
+        headers = {
+            "x-rapidapi-host": "real-time-real-estate-data.p.rapidapi.com",
+            "x-rapidapi-key": api_key
+        }
+        params = {
+            "location": location,
+            "beds_min": beds_min,
+            "beds_max": beds_max,
+        }
+        if status:
+            params["home_status"] = status
+            
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=15)
+            resp.raise_for_status()
+            return resp.json().get('data', [])
+        except Exception as e:
+            print(f"RapidAPI fetch error: {e}")
+            return []
+
     def get_subject_profile(self, address_string):
         """Identifies property via County, then enriches with RapidAPI."""
         # 0. Local DB cache check — if we've already resolved this address
@@ -75,9 +102,7 @@ class TaxGrieveCore:
         if profile.get('sqft', 0) == 0 or profile.get('bedrooms', 0) == 0 or profile.get('assessment_2025', 0) == 0:
             try:
                 town = county.get_town_from_identifier(identifier)
-                cmd = ["bash", "tools/fetch_comps.sh", f"{profile['address']}, {town}, NY", "0", "99"]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                market_data = json.loads(result.stdout).get('data', [])
+                market_data = self._fetch_rapidapi_comps(f"{profile['address']}, {town}, NY", 0, 99)
                 if market_data:
                     md = market_data[0]
                     rf = md.get('resoFacts', {})
@@ -175,6 +200,24 @@ class TaxGrieveCore:
             cursor.execute("ALTER TABLE properties ADD COLUMN zip TEXT")
         if 'property_class' not in cols:
             cursor.execute("ALTER TABLE properties ADD COLUMN property_class TEXT")
+        if 'condition_code' not in cols:
+            cursor.execute("ALTER TABLE properties ADD COLUMN condition_code TEXT")
+        if 'grade' not in cols:
+            cursor.execute("ALTER TABLE properties ADD COLUMN grade TEXT")
+        if 'basement_type' not in cols:
+            cursor.execute("ALTER TABLE properties ADD COLUMN basement_type TEXT")
+        if 'heat_type' not in cols:
+            cursor.execute("ALTER TABLE properties ADD COLUMN heat_type TEXT")
+        if 'style' not in cols:
+            cursor.execute("ALTER TABLE properties ADD COLUMN style TEXT")
+        if 'is_flood_zone' not in cols:
+            cursor.execute("ALTER TABLE properties ADD COLUMN is_flood_zone INTEGER DEFAULT 0")
+        if 'nuisance_rail' not in cols:
+            cursor.execute("ALTER TABLE properties ADD COLUMN nuisance_rail INTEGER DEFAULT 0")
+        if 'nuisance_highway' not in cols:
+            cursor.execute("ALTER TABLE properties ADD COLUMN nuisance_highway INTEGER DEFAULT 0")
+        if 'amenity_park' not in cols:
+            cursor.execute("ALTER TABLE properties ADD COLUMN amenity_park INTEGER DEFAULT 0")
         
         cursor.execute("SELECT id FROM properties WHERE sbl = ?", (subject_data['sbl'],))
         row = cursor.fetchone()
@@ -199,13 +242,27 @@ class TaxGrieveCore:
                                 latitude = COALESCE(?, latitude),
                                 longitude = COALESCE(?, longitude),
                                 zip = COALESCE(?, zip),
-                                property_class = COALESCE(NULLIF(?, ''), property_class)
+                                property_class = COALESCE(NULLIF(?, ''), property_class),
+                                condition_code = COALESCE(NULLIF(?, ''), condition_code),
+                                grade = COALESCE(NULLIF(?, ''), grade),
+                                basement_type = COALESCE(NULLIF(?, ''), basement_type),
+                                heat_type = COALESCE(NULLIF(?, ''), heat_type),
+                                style = COALESCE(NULLIF(?, ''), style),
+                                is_flood_zone = COALESCE(?, is_flood_zone),
+                                nuisance_rail = COALESCE(?, nuisance_rail),
+                                nuisance_highway = COALESCE(?, nuisance_highway),
+                                amenity_park = COALESCE(?, amenity_park)
                               WHERE id = ?''',
                            (subject_data.get('sqft', 0), subject_data.get('bedrooms', 0),
                             subject_data.get('bathrooms', 0), subject_data.get('year_built', 0),
                             subject_data.get('assessment_2025', 0), subject_data.get('assessment_2026', 0),
                             subject_data.get('latitude'), subject_data.get('longitude'), subject_data.get('zip'),
                             subject_data.get('property_class'),
+                            subject_data.get('condition_code'), subject_data.get('grade'),
+                            subject_data.get('basement_type'), subject_data.get('heat_type'),
+                            subject_data.get('style'),
+                            subject_data.get('is_flood_zone'), subject_data.get('nuisance_rail'),
+                            subject_data.get('nuisance_highway'), subject_data.get('amenity_park'),
                             row_id))
             
         conn.commit()
@@ -236,6 +293,16 @@ class TaxGrieveCore:
         if 'rejection_reason' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN rejection_reason TEXT")
         if 'is_selected' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN is_selected INTEGER DEFAULT 0")
         if 'grade' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN grade TEXT")
+        if 'condition_code' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN condition_code TEXT")
+        if 'bldg_grade' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN bldg_grade TEXT")
+        if 'basement_type' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN basement_type TEXT")
+        if 'heat_type' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN heat_type TEXT")
+        if 'style' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN style TEXT")
+        if 'property_class' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN property_class TEXT")
+        if 'is_flood_zone' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN is_flood_zone INTEGER DEFAULT 0")
+        if 'nuisance_rail' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN nuisance_rail INTEGER DEFAULT 0")
+        if 'nuisance_highway' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN nuisance_highway INTEGER DEFAULT 0")
+        if 'amenity_park' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN amenity_park INTEGER DEFAULT 0")
 
         # Drop duplicate (target_property_id, zpid) rows that accumulated before
         # we added the UNIQUE index, keeping the most recent (max id) per pair.
@@ -268,6 +335,13 @@ class TaxGrieveCore:
         town = county.get_town_from_identifier(subject['sbl'])
         location = f"{town}, NY"
 
+        # Fetch RAR from SODA API
+        from app.orpts import OrptsClient
+        orpts_client = OrptsClient()
+        subj_swis = subject.get('sbl', '')[:6]
+        rates = orpts_client.get_municipal_rates(subj_swis)
+        rar = rates.get('rar', 100.0)
+
         # For Ulster, the per-comp NYS verification is the slowest path. Swap
         # in a fast-fail variant (3s timeout) so one slow query can't multiply
         # across dozens of comps. Comps that don't verify in time still get
@@ -289,22 +363,11 @@ class TaxGrieveCore:
         yield {"status": "searching", "message": f"Querying RapidAPI for sold listings in {location} ({beds_min}-{beds_max} beds)..."}
         
         try:
-            cmd = ["bash", "tools/fetch_comps.sh", location, str(beds_min), str(beds_max), "RECENTLY_SOLD"]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
-            
-            try:
-                response_data = json.loads(result.stdout)
-            except json.JSONDecodeError:
-                yield {"status": "error", "message": "Failed to parse RapidAPI response."}
-                return
-
-            raw_comps = response_data.get('data', [])
+            raw_comps = self._fetch_rapidapi_comps(location, beds_min, beds_max, "RECENTLY_SOLD")
             
             if not raw_comps:
                 yield {"status": "searching", "message": "No specific matches. Trying broader search..."}
-                cmd = ["bash", "tools/fetch_comps.sh", location, "0", "99", "RECENTLY_SOLD"]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
-                raw_comps = json.loads(result.stdout).get('data', [])
+                raw_comps = self._fetch_rapidapi_comps(location, 0, 99, "RECENTLY_SOLD")
 
             # Property-class and same-municipality filtering.
             from app.property_class import expected_hometype
@@ -467,9 +530,15 @@ class TaxGrieveCore:
                     }
 
                 if comp_obj:
+                    # Enforce Hard Filters
+                    passes, reason = self._passes_hard_filters(subject, comp_obj)
+                    if not passes:
+                        yield {"status": "resuming", "message": f"Rejected by Hard Filter: {reason} ({comp_obj['address']})"}
+                        continue
+
                     # Calculate Grade & Score immediately
+                    comp_obj['similarity_score'] = self.calculate_similarity(subject, comp_obj, rar=rar)
                     comp_obj['grade'] = self.calculate_similarity_grade(subject, comp_obj)
-                    comp_obj['similarity_score'] = self.calculate_similarity(subject, comp_obj)
                     comp_obj['is_selected'] = 0 # Default to unselected for human review
 
                     # Ensure distance_miles column exists (migration is idempotent)
@@ -480,12 +549,19 @@ class TaxGrieveCore:
                         conn.commit()
                     
                     cursor.execute("""
-                        INSERT OR REPLACE INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, zpid, status, assessment_2026, assessment_2025, distance_miles, grade, similarity_score, is_selected)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT OR REPLACE INTO sales_comps (
+                            target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, 
+                            bedrooms, bathrooms, year_built, zpid, status, assessment_2026, assessment_2025, 
+                            distance_miles, grade, similarity_score, is_selected,
+                            condition_code, bldg_grade, basement_type, heat_type, style, property_class
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (subject_id, comp_obj['address'], comp_obj['sbl'], comp_obj['sale_price'], comp_obj['sale_date'],
                          comp_obj['sqft'], comp_obj['acreage'], comp_obj['bedrooms'], comp_obj['bathrooms'], comp_obj['year_built'],
                          comp_obj['zpid'], comp_obj['status'], comp_obj.get('assessment_2026', 0), comp_obj.get('assessment_2025', 0), comp_obj.get('distance_miles'),
-                         comp_obj['grade'], comp_obj['similarity_score'], comp_obj['is_selected']))
+                         comp_obj['grade'], comp_obj['similarity_score'], comp_obj['is_selected'],
+                         comp_obj.get('condition_code', ''), comp_obj.get('grade', ''), comp_obj.get('basement_type', ''),
+                         comp_obj.get('heat_type', ''), comp_obj.get('style', ''), comp_obj.get('property_class', '')))
                     conn.commit()
                     enriched_comps.append(comp_obj)
                     yield {"status": "verified", "comp": comp_obj}
@@ -498,48 +574,153 @@ class TaxGrieveCore:
         finally:
             conn.close()
 
+    def _passes_hard_filters(self, subject, comp, valuation_date="2024-07-01"):
+        """
+        Enforce strict exclusion rules. Returns (True, "") or (False, "reason").
+        """
+        # 1. Geography Rule: Strict SWIS boundary (Village vs Town)
+        subj_swis = subject.get('sbl', '')[:6]
+        comp_swis = comp.get('sbl', '')[:6]
+        if subj_swis and comp_swis and comp_swis != 'UNVERIFIED':
+            # 135001 = Village, 135089 = Town. They must match exactly.
+            if subj_swis in ['135001', '135089'] and comp_swis in ['135001', '135089']:
+                if subj_swis != comp_swis:
+                    return False, "Crosses Town/Village boundary"
+
+        # 2. Temporal Rule: ±6 months of Valuation Date (Valuation Date is July 1 of prior year)
+        # So for 2025 roll, val date is July 1, 2024. Window is Jan 1 2024 - Dec 31 2024.
+        sale_date = comp.get('sale_date', '')
+        if sale_date:
+            try:
+                import datetime as _dt
+                s_date = _dt.datetime.strptime(sale_date, '%Y-%m-%d').date()
+                v_date = _dt.datetime.strptime(valuation_date, '%Y-%m-%d').date()
+                delta = abs((s_date - v_date).days)
+                if delta > 183: # ~6 months
+                    return False, "Sale date outside 12-month window"
+            except ValueError:
+                pass
+
+        # 3. Arm's-Length Rule: <$100,000 transfers or obvious non-market status
+        sale_price = comp.get('sale_price', 0)
+        if sale_price < 100000:
+            return False, "Non-arm's-length transfer (<$100k sale)"
+            
+        status = comp.get('status', '').upper()
+        if 'FORECLOSURE' in status or 'SHORT_SALE' in status:
+            return False, "Foreclosure or Short Sale"
+
+        # 4. GLA Variance: Discard if > 20%
+        subj_sqft = subject.get('sqft', 0)
+        comp_sqft = comp.get('sqft', 0)
+        if subj_sqft > 0 and comp_sqft > 0:
+            variance = abs(comp_sqft - subj_sqft) / subj_sqft
+            if variance > 0.20:
+                return False, f"GLA variance > 20% ({variance:.1%})"
+
+        return True, ""
+
     def calculate_effective_year_built(self, original_year, renovation_year):
-        """
-        Calculates a weighted Effective Year Built based on a major renovation.
-        Heuristic: Split the difference between original and renovation.
-        """
+        """Calculates a weighted Effective Year Built based on a major renovation."""
         if not renovation_year or renovation_year <= original_year:
             return original_year
         return int((original_year + renovation_year) / 2)
 
-    def calculate_similarity(self, subject, comp, renovation_year=None):
-        """Similarity scoring out of 100. Weights redistribute when a
-        dimension is missing so 'no data' doesn't tank an otherwise good comp.
-        Defaults: Sqft 40, Age 30, Acreage 20, Distance 10."""
-        def normalize(val, target, tolerance):
-            if target == 0 or val == 0: return None
-            return max(0, 1 - (abs(val - target) / (target * tolerance)))
+    def calculate_similarity(self, subject, comp, renovation_year=None, rar=100.0):
+        """
+        Calculates Total Score = (Similarity Index * 0.70) + (Advantage Index * 0.30)
+        Similarity Index (0-100): Date, GLA, Style/Era, Grade/Condition.
+        Advantage Index (0-100): Based on price/sqft vs target EMV/sqft.
+        """
+        import datetime as _dt
+        
+        # --- SIMILARITY INDEX (70%) ---
+        sim_points = 0.0
+        max_sim_points = 100.0
 
+        # 1. Date (Max 25 pts)
+        date_pts = 0
+        sale_date_str = comp.get('sale_date')
+        if sale_date_str:
+            try:
+                s_date = _dt.datetime.strptime(sale_date_str, '%Y-%m-%d').date()
+                v_date = _dt.date(2024, 7, 1) # Valuation date
+                days_diff = abs((s_date - v_date).days)
+                if days_diff <= 183:
+                    date_pts = max(0, 25 * (1 - (days_diff / 183)))
+            except ValueError:
+                pass
+        sim_points += date_pts
+
+        # 2. GLA (Max 30 pts)
+        gla_pts = 0
+        subj_sqft = subject.get('sqft', 0)
+        comp_sqft = comp.get('sqft', 0)
+        if subj_sqft > 0 and comp_sqft > 0:
+            var = abs(comp_sqft - subj_sqft) / subj_sqft
+            if var <= 0.05:
+                gla_pts = 30
+            elif var <= 0.20:
+                # Linear deduct between 5% and 20%
+                gla_pts = max(0, 30 * (1 - ((var - 0.05) / 0.15)))
+        sim_points += gla_pts
+
+        # 3. Style & Era (Max 25 pts)
+        style_pts = 0
+        if subject.get('style') and comp.get('style') and subject.get('style') == comp.get('style'):
+            style_pts += 15
+        
         subj_year = subject.get('year_built', 0)
         if renovation_year:
             subj_year = self.calculate_effective_year_built(subj_year, renovation_year)
-
-        sqft_n = normalize(comp.get('sqft', 0), subject.get('sqft', 0), 0.20)
-        acre_n = normalize(comp.get('acreage', 0), subject.get('acreage', 0), 0.50)
-
         comp_year = comp.get('year_built', 0)
-        if comp_year and subj_year:
-            age_n = max(0, 1 - (abs(comp_year - subj_year) / 50))
+        if subj_year and comp_year and abs(subj_year - comp_year) <= 10:
+            style_pts += 10
+        sim_points += style_pts
+
+        # 4. Grade/Condition (Max 20 pts)
+        cond_pts = 0
+        subj_cond = (subject.get('condition_code') or '').lower()
+        comp_cond = (comp.get('condition_code') or '').lower()
+        if subj_cond and comp_cond:
+            if subj_cond == comp_cond:
+                cond_pts = 20
+            else:
+                cond_pts = 5 # arbitrary low value for mismatch
         else:
-            age_n = None
+            cond_pts = 10 # average if missing data
+        sim_points += cond_pts
 
-        dist = comp.get('distance_miles')
-        if dist is None: dist = 0.5
-        dist_n = max(0, 1 - (dist / 5))
+        similarity_index = (sim_points / max_sim_points) * 100
 
-        # Weighted average over available dimensions, scaled back to 0-100.
-        parts = [(sqft_n, 40), (age_n, 30), (acre_n, 20), (dist_n, 10)]
-        avail = [(n, w) for n, w in parts if n is not None]
-        if not avail:
-            return 0.0
-        total_w = sum(w for _, w in avail)
-        score = sum(n * w for n, w in avail) / total_w * 100
-        return round(score, 1)
+        # --- ADVANTAGE INDEX (30%) ---
+        # Calculate Target EMV/sqft = (Assessed Value / RAR) / Target GLA
+        target_emv_sqft = 0
+        av = subject.get('assessment_2025', 0)
+        if av > 0 and subj_sqft > 0 and rar > 0:
+            target_emv = av / (rar / 100.0)
+            target_emv_sqft = target_emv / subj_sqft
+
+        # Comp Price/sqft = Sale Price / Comp GLA
+        comp_price_sqft = 0
+        sale_price = comp.get('sale_price', 0)
+        if sale_price > 0 and comp_sqft > 0:
+            comp_price_sqft = sale_price / comp_sqft
+
+        advantage_index = 0
+        # The prompt says: "Rank comps inversely by their price per sqft. Award 100 points to the comp with the lowest price per sqft relative to the target's EMV per sqft."
+        # We'll calculate a relative ratio. Lower comp_price_sqft compared to target_emv_sqft is better.
+        if target_emv_sqft > 0 and comp_price_sqft > 0:
+            ratio = comp_price_sqft / target_emv_sqft
+            # If ratio is 1.0 (they match), advantage is 50.
+            # If ratio is 0.5 (comp is half the price of target), advantage is high (e.g. 100)
+            # If ratio is 1.5 (comp is way more expensive), advantage is low (0)
+            advantage_index = max(0, min(100, 100 - ((ratio - 0.5) * 100)))
+        else:
+            advantage_index = 50 # Default if data missing
+
+        total_score = (similarity_index * 0.70) + (advantage_index * 0.30)
+        return round(total_score, 1)
 
     def calculate_similarity_grade(self, subject, comp, renovation_year=None, valuation_date="2025-07-01"):
         """
@@ -572,7 +753,7 @@ class TaxGrieveCore:
         return "F"
 
     def calculate_valuation(self, subject, comps, adjs=None, renovation_year=None,
-                            best_n: int = 5, condition_factor: float = 1.0, enforce_selection=False):
+                            best_n: int = 3, condition_factor: float = 1.0, enforce_selection=False):
         """Sales-comparison valuation with median+IQR outlier filter and a
         best-N selection. Returns a rich result dict (not just market_value)
         so callers can show defensible breakdowns.
@@ -618,44 +799,64 @@ class TaxGrieveCore:
             if adj_price == 0:
                 continue
 
-            gla_adj = (get_val(subject, 'sqft') - get_val(comp, 'sqft')) * adjs['sqft']
-            acre_adj = (get_val(subject, 'acreage') - get_val(comp, 'acreage')) * adjs['acre']
-            bath_adj = (get_val(subject, 'bathrooms') - get_val(comp, 'bathrooms')) * adjs['bathroom']
-            bed_adj = (get_val(subject, 'bedrooms') - get_val(comp, 'bedrooms')) * adjs['bedroom']
-            comp_year = get_val(comp, 'year_built')
-            age_adj = (subj_year - comp_year) * adjs['year_built'] if comp_year and subj_year else 0
+            try:
+                gla_adj = (get_val(subject, 'sqft') - get_val(comp, 'sqft')) * adjs.get('sqft', 150.0)
+                acre_adj = (get_val(subject, 'acreage') - get_val(comp, 'acreage')) * adjs.get('acre', 50000.0)
+                bath_adj = (get_val(subject, 'bathrooms') - get_val(comp, 'bathrooms')) * adjs.get('bathroom', 15000.0)
+                bed_adj = (get_val(subject, 'bedrooms') - get_val(comp, 'bedrooms')) * adjs.get('bedroom', 10000.0)
+                comp_year = get_val(comp, 'year_built')
+                age_adj = (subj_year - comp_year) * adjs.get('year_built', 1000.0) if comp_year and subj_year else 0
+                
+                # New Adjustments
+                # Finished Basement
+                subj_bsmt = 1 if (subject.get('basement_type') or '').lower() == 'finished' else 0
+                comp_bsmt = 1 if (comp.get('basement_type') or '').lower() == 'finished' else 0
+                basement_adj = (subj_bsmt - comp_bsmt) * adjs.get('finished_basement', 20000.0)
+                
+                # Flood Zone (Negative value: Subject has it, Comp doesn't -> subtract from Comp)
+                subj_flood = 1 if subject.get('is_flood_zone') else 0
+                comp_flood = 1 if comp.get('is_flood_zone') else 0
+                fz_adj = (subj_flood - comp_flood) * -adjs.get('flood_zone', 25000.0)
+                
+                # Nuisance (Negative value)
+                subj_n = 1 if subject.get('nuisance_rail') or subject.get('nuisance_highway') else 0
+                comp_n = 1 if comp.get('nuisance_rail') or comp.get('nuisance_highway') else 0
+                nuisance_adj = (subj_n - comp_n) * -adjs.get('nuisance', 15000.0)
 
-            reconciled = adj_price + gla_adj + acre_adj + bath_adj + bed_adj + age_adj
-            # Condition multiplier (user-set, default 1.0)
-            reconciled *= condition_factor
-            # Safety floor at 10% of sale price.
-            reconciled = max(reconciled, adj_price * 0.1)
+                reconciled = adj_price + gla_adj + acre_adj + bath_adj + bed_adj + age_adj + basement_adj + fz_adj + nuisance_adj
+                # Condition multiplier (user-set, default 1.0)
+                reconciled *= condition_factor
+                # Safety floor at 10% of sale price.
+                reconciled = max(reconciled, adj_price * 0.1)
 
-            score = self.calculate_similarity(subject, comp, renovation_year=renovation_year)
+                score = self.calculate_similarity(subject, comp, renovation_year=renovation_year)
 
-            raw_results.append({
-                'address': comp['address'], 'sale_price': comp['sale_price'],
-                'reconciled_value': reconciled, 'similarity_score': score,
-                'grade': comp.get('grade', 'C'),
-                'is_selected': comp.get('is_selected', 0),
-                'adjustments': {
-                    'gla': gla_adj, 'acreage': acre_adj, 'bath': bath_adj,
-                    'bed': bed_adj, 'age': age_adj,
-                },
-                'zpid': comp.get('zpid'),
-                'status': comp.get('status', 'VERIFIED'),
-                'assessment_2026': comp.get('assessment_2026', 0),
-                'assessment_2025': comp.get('assessment_2025', 0),
-                'distance_miles': comp.get('distance_miles'),
-                'sqft': comp.get('sqft', 0),
-                'year_built': comp.get('year_built', 0),
-                'bedrooms': comp.get('bedrooms', 0),
-                'bathrooms': comp.get('bathrooms', 0),
-                'acreage': comp.get('acreage', 0),
-                'sale_date': comp.get('sale_date'),
-                'is_outlier': False,
-                'used': False,
-            })
+                raw_results.append({
+                    'address': comp['address'], 'sale_price': comp['sale_price'],
+                    'reconciled_value': reconciled, 'similarity_score': score,
+                    'grade': comp.get('grade', 'C'),
+                    'is_selected': comp.get('is_selected', 0),
+                    'adjustments': {
+                        'gla': gla_adj, 'acreage': acre_adj, 'bath': bath_adj,
+                        'bed': bed_adj, 'age': age_adj, 'basement': basement_adj,
+                        'flood_zone': fz_adj, 'nuisance': nuisance_adj
+                    },
+                    'zpid': comp.get('zpid'),
+                    'status': comp.get('status', 'VERIFIED'),
+                    'assessment_2026': comp.get('assessment_2026', 0),
+                    'assessment_2025': comp.get('assessment_2025', 0),
+                    'distance_miles': comp.get('distance_miles'),
+                    'sqft': comp.get('sqft', 0),
+                    'year_built': comp.get('year_built', 0),
+                    'bedrooms': comp.get('bedrooms', 0),
+                    'bathrooms': comp.get('bathrooms', 0),
+                    'acreage': comp.get('acreage', 0),
+                    'sale_date': comp.get('sale_date'),
+                    'is_outlier': False,
+                    'used': False,
+                })
+            except Exception as e:
+                print(f"Skipping comp {comp.get('address')} in valuation due to error: {e}")
 
         if not raw_results:
             return {

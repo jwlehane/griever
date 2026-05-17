@@ -376,7 +376,17 @@
 
                 function read() {
                     reader.read().then(({ done, value }) => {
-                        if (done) return;
+                        if (done) {
+                            const statusEl = document.getElementById('status-msg');
+                            if (statusEl && !document.body.innerHTML.includes('Curation Dashboard')) {
+                                if (!statusEl.innerHTML.includes('Error Occurred')) {
+                                    statusEl.innerHTML = "Stream completed but UI did not load. Please check logs or try again.";
+                                }
+                                document.getElementById('stop-btn').style.display = 'none';
+                                document.getElementById('resume-btn').style.display = 'block';
+                            }
+                            return;
+                        }
                         buffer += decoder.decode(value, { stream: true });
                         const lines = buffer.split('\n\n');
                         buffer = lines.pop(); // Keep the last incomplete chunk in the buffer
@@ -394,7 +404,13 @@
                         read();
                     }).catch(err => {
                         if (err.name === 'AbortError') console.log('Fetch aborted');
-                        else console.error('Fetch error:', err);
+                        else {
+                            console.error('Fetch error:', err);
+                            const statusEl = document.getElementById('status-msg');
+                            if (statusEl) statusEl.innerHTML = "❌ Connection Lost";
+                            document.getElementById('stop-btn').style.display = 'none';
+                            document.getElementById('resume-btn').style.display = 'block';
+                        }
                     });
                 }
                 read();
@@ -430,6 +446,8 @@
             } else if (data.status === 'error') {
                 status.innerHTML = "❌ Error Occurred";
                 log.innerHTML += `<span style="color: #e74c3c;">ERROR: ${data.message}</span>\n`;
+                document.getElementById('stop-btn').style.display = 'none';
+                document.getElementById('resume-btn').style.display = 'block';
             } else if (data.status === 'verified') {
                 const comp = data.comp;
                 const rowId = `comp-${comp.zpid || comp.address.replace(/\s+/g, '-')}`;

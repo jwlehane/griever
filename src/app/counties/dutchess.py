@@ -193,7 +193,12 @@ class DutchessCounty(CountyInterface):
                 'year_built': int(get_f(res_bldg, 'yr_built', 0)),
                 'assessment_2026': total_av,
                 'assessment_2025': 0.0, 
-                'property_class': str(get_f(primary, 'prop_class_desc', '')).strip()
+                'property_class': str(get_f(primary, 'prop_class_desc', '')).strip(),
+                'condition_code': str(get_f(res_bldg, 'cond_desc', '')).strip(),
+                'grade': str(get_f(res_bldg, 'grade_desc', '')).strip(),
+                'basement_type': str(get_f(res_bldg, 'rbsmnt_typ_desc', '')).strip(),
+                'heat_type': str(get_f(res_bldg, 'heat_type_desc', '')).strip(),
+                'style': str(get_f(res_bldg, 'bldg_style_desc', '')).strip()
             }
         except Exception as e:
             import traceback

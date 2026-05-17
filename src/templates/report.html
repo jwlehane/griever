@@ -65,7 +65,7 @@
         <p>You can print this page for your records, or use the buttons below to download the officially formatted <b>RP-524 PDF</b> and the <b>Evidence Package</b> required for filing.</p>
     </details>
 
-    <div class="btn-row">
+    {% if reduction > 0 %}
     <div class="alert-box alert-good">
         <strong>✅ Grievance Appears Warranted.</strong>
         Filing RP-524 could reduce your assessment by approximately <strong>${{ "{:,.0f}".format(reduction) }}</strong>.

@@ -54,7 +54,10 @@
             <p>{{ subject.bedrooms }} Beds, {{ subject.bathrooms }} Baths, {{ subject.sqft }} Sqft, Built {{ subject.year_built }}</p>
         </div>
 
-        <h2>Available Comps</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2>Available Comps</h2>
+            <button type="button" onclick="autoSelectTop3()" style="background: #27ae60; color: white; padding: 10px 20px; font-size: 14px;">Auto-Select Top 3</button>
+        </div>
         <table id="compsTable">
             <thead>
                 <tr>
@@ -68,8 +71,8 @@
             </thead>
             <tbody>
                 {% for comp in comps %}
-                <tr id="row-{{ loop.index }}">
-                    <td>
+                <tr id="row-{{ loop.index }}" data-outlier="{{ 'true' if comp.is_outlier else 'false' }}" data-score="{{ comp.similarity_score }}">
+                    <td title="Grade is based on similarity score (Sqft 40%, Age 30%, Acreage 20%, Distance 10%) with a penalty for sales older than 12 months.">
                         <span class="grade grade-{{ comp.grade }}">{{ comp.grade }}</span><br>
                         <small>{{ "%.1f"|format(comp.similarity_score) }}%</small>
                     </td>
@@ -180,6 +183,68 @@
             }
         }
 
+        function toggleSelect(idx, subjectId, zpid, address) {
+            const btn = document.getElementById(`sel-${idx}`);
+            const isSelected = btn.classList.contains('selected');
+            const endpoint = isSelected ? '/unselect_comp' : '/select_comp';
+            
+            const formData = new FormData();
+            formData.append('property_id', subjectId);
+            if (zpid && zpid !== 'None') formData.append('zpid', zpid);
+            formData.append('address', address);
+
+            fetch(endpoint, { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if(data.status === 'success') {
+                        if (isSelected) {
+                            btn.classList.remove('selected');
+                            btn.innerText = 'Select';
+                        } else {
+                            btn.classList.add('selected');
+                            btn.innerText = 'Selected';
+                        }
+                    }
+                });
+        }
+
+        function openRejectModal(idx, subjectId, zpid, address) {
+            document.getElementById('rejRow').value = idx;
+            document.getElementById('rejSubjId').value = subjectId;
+            document.getElementById('rejZpid').value = zpid;
+            document.getElementById('rejAddr').value = address;
+            document.getElementById('rejectModal').style.display = 'block';
+        }
+
+        function confirmReject() {
+            const idx = document.getElementById('rejRow').value;
+            const formData = new FormData();
+            formData.append('property_id', document.getElementById('rejSubjId').value);
+            formData.append('address', document.getElementById('rejAddr').value);
+            const zpid = document.getElementById('rejZpid').value;
+            if (zpid && zpid !== 'None') formData.append('zpid', zpid);
+            formData.append('reason', document.getElementById('rejectReason').value);
+
+            fetch('/reject_comp', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if(data.status === 'success') {
+                        document.getElementById(`row-${idx}`).style.display = 'none';
+                        document.getElementById('rejectModal').style.display = 'none';
+                    }
+                });
+        }
+
+        document.addEventListener('submit', function(e) {
+            if (e.target && e.target.id === 'finalize-form') {
+                const selectedCount = document.querySelectorAll('.btn-select.selected').length;
+                if (selectedCount < 3) {
+                    e.preventDefault();
+                    alert("Please select at least 3 comps to finalize your valuation.");
+                }
+            }
+        });
+
         function updatePricing() {
             const formData = new FormData();
             formData.append('address', '{{ subject.address }}');
@@ -200,6 +265,31 @@
                 document.body.innerHTML = html;
             })
             .catch(error => console.error('Error updating pricing:', error));
+        }
+
+        function autoSelectTop3() {
+            const rows = Array.from(document.querySelectorAll('#compsTable tbody tr'));
+            const validRows = rows.filter(row => row.getAttribute('data-outlier') !== 'true');
+            
+            // Sort by score descending
+            validRows.sort((a, b) => parseFloat(b.getAttribute('data-score')) - parseFloat(a.getAttribute('data-score')));
+            
+            const top3 = validRows.slice(0, 3);
+            
+            // Iterate through all rows and click to select/unselect appropriately
+            rows.forEach(row => {
+                const btn = row.querySelector('.btn-select');
+                if (!btn) return;
+                
+                const isSelected = btn.classList.contains('selected');
+                const shouldBeSelected = top3.includes(row);
+                
+                if (isSelected && !shouldBeSelected) {
+                    btn.click();
+                } else if (!isSelected && shouldBeSelected) {
+                    btn.click();
+                }
+            });
         }
     </script>
 </body>

@@ -23,14 +23,18 @@ _DEFAULT = {
     "bedroom": 10000.0,
     "acre": 50000.0,
     "year_built": 1000.0,
+    "finished_basement": 20000.0,
+    "flood_zone": 25000.0,
+    "nuisance": 15000.0,
 }
 
 # Overrides per SWIS. Numbers reflect typical 2024-2025 market conditions in
 # each municipality; tweak as paired-sales data improves.
 ADJUSTMENTS_BY_SWIS: dict[str, dict[str, float]] = {
     # ---------- DUTCHESS (selected hot/cold markets) ----------
-    "135089": {"sqft": 220.0, "bathroom": 25000.0, "bedroom": 15000.0, "acre": 80000.0, "year_built": 1500.0},  # Rhinebeck town
-    "135001": {"sqft": 250.0, "bathroom": 25000.0, "bedroom": 15000.0, "acre": 120000.0, "year_built": 1500.0},  # Rhinebeck village
+    # ---------- DUTCHESS (selected hot/cold markets) ----------
+    "135089": {"sqft": 220.0, "bathroom": 25000.0, "bedroom": 15000.0, "acre": 80000.0, "year_built": 1500.0, "finished_basement": 25000.0, "flood_zone": 30000.0, "nuisance": 20000.0},  # Rhinebeck town
+    "135001": {"sqft": 250.0, "bathroom": 25000.0, "bedroom": 15000.0, "acre": 120000.0, "year_built": 1500.0, "finished_basement": 25000.0, "flood_zone": 30000.0, "nuisance": 20000.0},  # Rhinebeck village
     "134803": {"sqft": 220.0, "bathroom": 22000.0, "bedroom": 14000.0, "acre": 60000.0, "year_built": 1500.0},  # Tivoli
     "134889": {"sqft": 215.0, "bathroom": 22000.0, "bedroom": 14000.0, "acre": 70000.0, "year_built": 1500.0},  # Red Hook
     "134801": {"sqft": 220.0, "bathroom": 22000.0, "bedroom": 14000.0, "acre": 80000.0, "year_built": 1500.0},  # Red Hook village
