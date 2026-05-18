@@ -77,6 +77,13 @@ BAR_BY_SWIS: dict[str, dict] = {
         "submission_method": "In person, 4–8 pm; mail accepted if postmarked by Grievance Day",
         "phone": "(845) 876-3409",
     },
+    "135001": {  # Rhinebeck (village)
+        "municipality": "Village of Rhinebeck",
+        "grievance_day": "Tuesday, February 18, 2025 (villages on city schedule)",
+        "bar_address": "Village of Rhinebeck Hall\n76 East Market Street\nRhinebeck, NY 12572",
+        "submission_method": "In person or by mail",
+        "phone": "(845) 876-7015",
+    },
     "134889": {  # Red Hook
         "municipality": "Town of Red Hook",
         "grievance_day": "Tuesday, May 27, 2025",

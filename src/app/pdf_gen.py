@@ -81,10 +81,10 @@ def render_rp524(ctx: dict[str, Any]) -> bytes:
     # ─── Part 1: Property identification ───
     body.append(Paragraph("Part 1. Identification of Property", s["H2u"]))
     p1 = [
-        ["Property owner(s)", "________________________________"],
-        ["Mailing address", "________________________________"],
-        ["Day phone", "________________________________"],
-        ["Email", "________________________________"],
+        ["Property owner(s)", ctx.get("owner_name") or "________________________________"],
+        ["Mailing address", ctx.get("owner_address") or "________________________________"],
+        ["Day phone", ctx.get("owner_phone") or "________________________________"],
+        ["Email", ctx.get("owner_email") or "________________________________"],
         ["Property location", subject.get("address", "")],
         ["Town / City / Village", bar.get("municipality") or subject.get("town") or ""],
         ["County", "Dutchess" if (subject.get("sbl") or "").startswith("13") else "Ulster"],
