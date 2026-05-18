@@ -889,7 +889,10 @@ class TaxGrieveCore:
         lo_fence = q1 - 1.5 * iqr
         hi_fence = q3 + 1.5 * iqr
         for r in raw_results:
-            r['is_outlier'] = not (lo_fence <= r['reconciled_value'] <= hi_fence)
+            if enforce_selection:
+                r['is_outlier'] = False
+            else:
+                r['is_outlier'] = not (lo_fence <= r['reconciled_value'] <= hi_fence)
 
         # Best-N: take top-N by similarity_score among non-outliers; if too few
         # survive the outlier filter, fall back to the top-N by similarity
@@ -898,7 +901,11 @@ class TaxGrieveCore:
         if len(kept) < min(3, n):
             kept = list(raw_results)
         kept.sort(key=lambda r: r['similarity_score'], reverse=True)
-        best = kept[:best_n] if best_n else kept
+        
+        if enforce_selection:
+            best = kept
+        else:
+            best = kept[:best_n] if best_n else kept
         for r in best:
             r['used'] = True
 
