@@ -1,21 +1,22 @@
 FROM python:3.11-slim
 WORKDIR /app
 
-# Install dependencies
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# System deps. curl is occasionally useful in container debugging; libpq is
+# pulled in transitively by psycopg2-binary so no separate install needed.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code and database
+# Source. .dockerignore keeps the local DB, venv, and secrets out of the
+# image. The app calls init_schema() at startup to create a fresh schema
+# (SQLite at /app/grievance_data.db when DATABASE_URL is unset, Postgres
+# otherwise).
 COPY . .
 RUN chmod +x tools/*.sh
 
-# Ensure the database is accessible in the working directory
-# The app looks for 'grievance_data.db' in the CWD.
-# We stay in /app so it finds /app/grievance_data.db
-
-# Ensure PYTHONPATH includes src so 'from app.core' works from src/main.py
 ENV PYTHONPATH=/app/src
 
-# Run from root, targeting src.main
+# Cloud Run injects PORT; fall back to 8080 for local docker run.
 CMD uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8080}

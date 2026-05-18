@@ -9,49 +9,13 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from app.core import TaxGrieveCore
 from app.counties.dutchess import DutchessCounty
+from app.db import init_schema
+
 
 def setup_test_db(db_path):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE properties (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            address TEXT NOT NULL,
-            sbl TEXT UNIQUE,
-            sqft REAL,
-            bedrooms INTEGER,
-            bathrooms REAL,
-            acreage REAL,
-            assessed_value_2026 REAL,
-            property_class TEXT,
-            year_built INTEGER,
-            assessment_2025 REAL
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE sales_comps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            target_property_id INTEGER,
-            address TEXT NOT NULL,
-            sbl TEXT,
-            sale_price REAL,
-            sale_date TEXT,
-            sqft REAL,
-            acreage REAL,
-            bedrooms REAL,
-            bathrooms REAL,
-            year_built INTEGER,
-            zpid TEXT,
-            status TEXT DEFAULT 'VERIFIED',
-            similarity_score REAL DEFAULT 0,
-            is_outlier INTEGER DEFAULT 0,
-            assessment_2026 REAL,
-            assessment_2025 REAL,
-            distance_miles REAL
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """Apply the canonical SQLite schema to db_path. Same code path the app
+    uses at startup, so test schema can't drift from production."""
+    init_schema(sqlite_path=db_path)
 
 def test_full_pipeline_flow():
     # Setup

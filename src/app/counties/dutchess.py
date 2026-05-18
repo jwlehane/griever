@@ -3,6 +3,7 @@ import re
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from app.counties.base import CountyInterface
 from app.exceptions import CountyAPIError
+from app.logging_safe import safe_addr
 
 API_BASE_URL = "https://gis.dutchessny.gov/parcelaccess/asp"
 
@@ -96,7 +97,7 @@ class DutchessCounty(CountyInterface):
         seen = set()
         street_options = [x for x in street_options if not (x in seen or seen.add(x))]
         
-        print(f"DEBUG: Searching {number} {clean_street} in {len(swis_options)} towns...")
+        print(f"DEBUG: Searching {safe_addr(f'{number} {clean_street}')} in {len(swis_options)} towns...")
 
         for s in swis_options:
             town_name = self.swis_map.get(s, s)

@@ -1,4 +1,5 @@
-from app.db import get_connection
+from app.db import get_connection, is_postgres, upsert_sql, column_exists
+from app.logging_safe import safe_addr
 import sqlite3
 import time
 import os
@@ -35,10 +36,23 @@ class TaxGrieveCore:
 
     def _fetch_rapidapi_comps(self, location, beds_min, beds_max, status=None):
         import requests
+        from app.cache import get_rapidapi_cached, set_rapidapi_cached
+        from app.comp_source import is_orpts, fetch_orpts_sold
+
+        # Comp-source switch — when counsel rejects RapidAPI persistence we
+        # flip COMP_SOURCE=orpts in prod env vars; no code change required.
+        if is_orpts():
+            return fetch_orpts_sold(location, beds_min, beds_max)
+
+        # Cache check first — no upstream call if a recent identical query landed.
+        cached = get_rapidapi_cached(location, beds_min, beds_max, status)
+        if cached is not None:
+            return cached
+
         api_key = os.getenv("RAPIDAPI_KEY")
         if not api_key:
             return []
-        
+
         url = "https://real-time-real-estate-data.p.rapidapi.com/search"
         headers = {
             "x-rapidapi-host": "real-time-real-estate-data.p.rapidapi.com",
@@ -51,11 +65,13 @@ class TaxGrieveCore:
         }
         if status:
             params["home_status"] = status
-            
+
         try:
             resp = requests.get(url, headers=headers, params=params, timeout=15)
             resp.raise_for_status()
-            return resp.json().get('data', [])
+            data = resp.json().get('data', [])
+            set_rapidapi_cached(location, beds_min, beds_max, status, data)
+            return data
         except Exception as e:
             print(f"RapidAPI fetch error: {e}")
             return []
@@ -144,20 +160,20 @@ class TaxGrieveCore:
 
         try:
             conn = get_connection(self.db_path)
-            conn.row_factory = sqlite3.Row
             c = conn.cursor()
-            c.execute("PRAGMA table_info(properties)")
-            cols = {row[1] for row in c.fetchall()}
-            if 'sbl' not in cols:
+            if not column_exists(c, 'properties', 'sbl'):
                 conn.close()
                 return None
+            # COLLATE NOCASE is SQLite-only; ILIKE is Postgres-only. Use a
+            # case-insensitive comparison that works on both by lowercasing
+            # both sides.
             c.execute(
-                "SELECT * FROM properties WHERE address LIKE ? COLLATE NOCASE AND sbl IS NOT NULL",
+                "SELECT * FROM properties WHERE LOWER(address) LIKE LOWER(?) AND sbl IS NOT NULL",
                 (pattern,),
             )
             rows = [dict(r) for r in c.fetchall()]
             conn.close()
-        except sqlite3.Error:
+        except Exception:
             return None
         if not rows:
             return None
@@ -182,43 +198,35 @@ class TaxGrieveCore:
         cursor = conn.cursor()
 
         # 1. ALWAYS ensure table exists first
-        cursor.execute('''CREATE TABLE IF NOT EXISTS properties
-                        (id INTEGER PRIMARY KEY, address TEXT, sbl TEXT, sqft REAL, acreage REAL,
-                         bedrooms REAL, bathrooms REAL, year_built INTEGER, assessment_2025 REAL, assessment_2026 REAL)''')
-
-        # 2. Then check for schema evolution (migration)
-        cursor.execute("PRAGMA table_info(properties)")
-        cols = [c[1] for c in cursor.fetchall()]
-        if 'assessment_2025' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN assessment_2025 REAL")
-        if 'assessment_2026' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN assessment_2026 REAL")
-        if 'latitude' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN latitude REAL")
-        if 'longitude' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN longitude REAL")
-        if 'zip' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN zip TEXT")
-        if 'property_class' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN property_class TEXT")
-        if 'condition_code' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN condition_code TEXT")
-        if 'grade' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN grade TEXT")
-        if 'basement_type' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN basement_type TEXT")
-        if 'heat_type' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN heat_type TEXT")
-        if 'style' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN style TEXT")
-        if 'is_flood_zone' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN is_flood_zone INTEGER DEFAULT 0")
-        if 'nuisance_rail' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN nuisance_rail INTEGER DEFAULT 0")
-        if 'nuisance_highway' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN nuisance_highway INTEGER DEFAULT 0")
-        if 'amenity_park' not in cols:
-            cursor.execute("ALTER TABLE properties ADD COLUMN amenity_park INTEGER DEFAULT 0")
+        # Legacy SQLite-only auto-migration. For new DBs, init_schema() in
+        # db.py created the table at startup with all columns; this block
+        # only does work for old SQLite files predating that. Postgres skips
+        # it entirely because PRAGMA table_info doesn't exist there.
+        if not is_postgres():
+            cursor.execute('''CREATE TABLE IF NOT EXISTS properties
+                            (id INTEGER PRIMARY KEY, address TEXT, sbl TEXT, sqft REAL, acreage REAL,
+                             bedrooms REAL, bathrooms REAL, year_built INTEGER, assessment_2025 REAL, assessment_2026 REAL)''')
+            cursor.execute("PRAGMA table_info(properties)")
+            cols = [c[1] for c in cursor.fetchall()]
+            for col, ddl in [
+                ('assessment_2025',  'ALTER TABLE properties ADD COLUMN assessment_2025 REAL'),
+                ('assessment_2026',  'ALTER TABLE properties ADD COLUMN assessment_2026 REAL'),
+                ('latitude',         'ALTER TABLE properties ADD COLUMN latitude REAL'),
+                ('longitude',        'ALTER TABLE properties ADD COLUMN longitude REAL'),
+                ('zip',              'ALTER TABLE properties ADD COLUMN zip TEXT'),
+                ('property_class',   'ALTER TABLE properties ADD COLUMN property_class TEXT'),
+                ('condition_code',   'ALTER TABLE properties ADD COLUMN condition_code TEXT'),
+                ('grade',            'ALTER TABLE properties ADD COLUMN grade TEXT'),
+                ('basement_type',    'ALTER TABLE properties ADD COLUMN basement_type TEXT'),
+                ('heat_type',        'ALTER TABLE properties ADD COLUMN heat_type TEXT'),
+                ('style',            'ALTER TABLE properties ADD COLUMN style TEXT'),
+                ('is_flood_zone',    'ALTER TABLE properties ADD COLUMN is_flood_zone INTEGER DEFAULT 0'),
+                ('nuisance_rail',    'ALTER TABLE properties ADD COLUMN nuisance_rail INTEGER DEFAULT 0'),
+                ('nuisance_highway', 'ALTER TABLE properties ADD COLUMN nuisance_highway INTEGER DEFAULT 0'),
+                ('amenity_park',     'ALTER TABLE properties ADD COLUMN amenity_park INTEGER DEFAULT 0'),
+            ]:
+                if col not in cols:
+                    cursor.execute(ddl)
         
         cursor.execute("SELECT id FROM properties WHERE sbl = ?", (subject_data['sbl'],))
         row = cursor.fetchone()
@@ -277,33 +285,41 @@ class TaxGrieveCore:
         # API key is absent.
         conn = get_connection(self.db_path)
         cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS sales_comps
-                        (id INTEGER PRIMARY KEY, target_property_id INTEGER, address TEXT, sbl TEXT,
-                         sale_price REAL, sale_date TEXT, sqft REAL, acreage REAL, bedrooms REAL,
-                         bathrooms REAL, year_built INTEGER, zpid TEXT, status TEXT DEFAULT 'VERIFIED',
-                         similarity_score REAL, is_outlier INTEGER DEFAULT 0,
-                         assessment_2026 REAL, assessment_2025 REAL, distance_miles REAL,
-                         rejection_reason TEXT, is_selected INTEGER DEFAULT 0, grade TEXT)''')
-        cursor.execute("PRAGMA table_info(sales_comps)")
-        cols = [c[1] for c in cursor.fetchall()]
-        if 'zpid' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN zpid TEXT")
-        if 'status' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN status TEXT DEFAULT 'VERIFIED'")
-        if 'assessment_2026' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN assessment_2026 REAL")
-        if 'assessment_2025' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN assessment_2025 REAL")
-        if 'distance_miles' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN distance_miles REAL")
-        if 'rejection_reason' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN rejection_reason TEXT")
-        if 'is_selected' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN is_selected INTEGER DEFAULT 0")
-        if 'grade' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN grade TEXT")
-        if 'condition_code' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN condition_code TEXT")
-        if 'bldg_grade' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN bldg_grade TEXT")
-        if 'basement_type' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN basement_type TEXT")
-        if 'heat_type' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN heat_type TEXT")
-        if 'style' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN style TEXT")
-        if 'property_class' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN property_class TEXT")
-        if 'is_flood_zone' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN is_flood_zone INTEGER DEFAULT 0")
-        if 'nuisance_rail' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN nuisance_rail INTEGER DEFAULT 0")
-        if 'nuisance_highway' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN nuisance_highway INTEGER DEFAULT 0")
-        if 'amenity_park' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN amenity_park INTEGER DEFAULT 0")
+        # Legacy SQLite-only auto-migration (see note above the properties
+        # equivalent in ensure_property). Postgres skips this — schema already
+        # came from schema_postgres.sql at init_schema() time.
+        if not is_postgres():
+            cursor.execute('''CREATE TABLE IF NOT EXISTS sales_comps
+                            (id INTEGER PRIMARY KEY, target_property_id INTEGER, address TEXT, sbl TEXT,
+                             sale_price REAL, sale_date TEXT, sqft REAL, acreage REAL, bedrooms REAL,
+                             bathrooms REAL, year_built INTEGER, zpid TEXT, status TEXT DEFAULT 'VERIFIED',
+                             similarity_score REAL, is_outlier INTEGER DEFAULT 0,
+                             assessment_2026 REAL, assessment_2025 REAL, distance_miles REAL,
+                             rejection_reason TEXT, is_selected INTEGER DEFAULT 0, grade TEXT)''')
+            cursor.execute("PRAGMA table_info(sales_comps)")
+            cols = [c[1] for c in cursor.fetchall()]
+            for col, ddl in [
+                ('zpid',             "ALTER TABLE sales_comps ADD COLUMN zpid TEXT"),
+                ('status',           "ALTER TABLE sales_comps ADD COLUMN status TEXT DEFAULT 'VERIFIED'"),
+                ('assessment_2026',  "ALTER TABLE sales_comps ADD COLUMN assessment_2026 REAL"),
+                ('assessment_2025',  "ALTER TABLE sales_comps ADD COLUMN assessment_2025 REAL"),
+                ('distance_miles',   "ALTER TABLE sales_comps ADD COLUMN distance_miles REAL"),
+                ('rejection_reason', "ALTER TABLE sales_comps ADD COLUMN rejection_reason TEXT"),
+                ('is_selected',      "ALTER TABLE sales_comps ADD COLUMN is_selected INTEGER DEFAULT 0"),
+                ('grade',            "ALTER TABLE sales_comps ADD COLUMN grade TEXT"),
+                ('condition_code',   "ALTER TABLE sales_comps ADD COLUMN condition_code TEXT"),
+                ('bldg_grade',       "ALTER TABLE sales_comps ADD COLUMN bldg_grade TEXT"),
+                ('basement_type',    "ALTER TABLE sales_comps ADD COLUMN basement_type TEXT"),
+                ('heat_type',        "ALTER TABLE sales_comps ADD COLUMN heat_type TEXT"),
+                ('style',            "ALTER TABLE sales_comps ADD COLUMN style TEXT"),
+                ('property_class',   "ALTER TABLE sales_comps ADD COLUMN property_class TEXT"),
+                ('is_flood_zone',    "ALTER TABLE sales_comps ADD COLUMN is_flood_zone INTEGER DEFAULT 0"),
+                ('nuisance_rail',    "ALTER TABLE sales_comps ADD COLUMN nuisance_rail INTEGER DEFAULT 0"),
+                ('nuisance_highway', "ALTER TABLE sales_comps ADD COLUMN nuisance_highway INTEGER DEFAULT 0"),
+                ('amenity_park',     "ALTER TABLE sales_comps ADD COLUMN amenity_park INTEGER DEFAULT 0"),
+            ]:
+                if col not in cols:
+                    cursor.execute(ddl)
 
         # Drop duplicate (target_property_id, zpid) rows that accumulated before
         # we added the UNIQUE index, keeping the most recent (max id) per pair.
@@ -458,7 +474,7 @@ class TaxGrieveCore:
                         if search_res and search_res.get('parcelgrid'):
                             official_data = county.get_full_rps_data(search_res.get('parcelgrid'))
                 except (CountyAPIError, Exception) as ve:
-                    print(f"  verify skipped for {full_addr}: {ve}")
+                    print(f"  verify skipped for {safe_addr(full_addr)}: {ve}")
                     official_data = None
 
                 sqft = rc.get('livingArea') or rc.get('area') or 0
@@ -542,22 +558,18 @@ class TaxGrieveCore:
                     comp_obj['grade'] = self.calculate_similarity_grade(subject, comp_obj)
                     comp_obj['is_selected'] = 0 # Default to unselected for human review
 
-                    # Ensure distance_miles column exists (migration is idempotent)
-                    cursor.execute("PRAGMA table_info(sales_comps)")
-                    _existing = {row[1] for row in cursor.fetchall()}
-                    if 'distance_miles' not in _existing:
-                        cursor.execute("ALTER TABLE sales_comps ADD COLUMN distance_miles REAL")
-                        conn.commit()
-                    
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO sales_comps (
-                            target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, 
-                            bedrooms, bathrooms, year_built, zpid, status, assessment_2026, assessment_2025, 
-                            distance_miles, grade, similarity_score, is_selected,
-                            condition_code, bldg_grade, basement_type, heat_type, style, property_class
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (subject_id, comp_obj['address'], comp_obj['sbl'], comp_obj['sale_price'], comp_obj['sale_date'],
+                    # distance_miles column existence is guaranteed by
+                    # init_schema()/the earlier legacy migration block, so
+                    # no need to PRAGMA-check here.
+                    _comp_cols = [
+                        'target_property_id', 'address', 'sbl', 'sale_price', 'sale_date', 'sqft', 'acreage',
+                        'bedrooms', 'bathrooms', 'year_built', 'zpid', 'status', 'assessment_2026', 'assessment_2025',
+                        'distance_miles', 'grade', 'similarity_score', 'is_selected',
+                        'condition_code', 'bldg_grade', 'basement_type', 'heat_type', 'style', 'property_class',
+                    ]
+                    cursor.execute(
+                        upsert_sql('sales_comps', _comp_cols, conflict_cols=['target_property_id', 'zpid']),
+                        (subject_id, comp_obj['address'], comp_obj['sbl'], comp_obj['sale_price'], comp_obj['sale_date'],
                          comp_obj['sqft'], comp_obj['acreage'], comp_obj['bedrooms'], comp_obj['bathrooms'], comp_obj['year_built'],
                          comp_obj['zpid'], comp_obj['status'], comp_obj.get('assessment_2026', 0), comp_obj.get('assessment_2025', 0), comp_obj.get('distance_miles'),
                          comp_obj['grade'], comp_obj['similarity_score'], comp_obj['is_selected'],
@@ -863,7 +875,7 @@ class TaxGrieveCore:
                     'used': False,
                 })
             except Exception as e:
-                print(f"Skipping comp {comp.get('address')} in valuation due to error: {e}")
+                print(f"Skipping comp {safe_addr(comp.get('address'))} in valuation due to error: {e}")
 
         if not raw_results:
             return {
@@ -1013,22 +1025,9 @@ class TaxGrieveCore:
         comp_obj['similarity_score'] = self.calculate_similarity(subject, comp_obj, rar=rar)
         comp_obj['grade'] = self.calculate_similarity_grade(subject, comp_obj)
         
-        # Insert
-        cursor.execute('''CREATE TABLE IF NOT EXISTS sales_comps
-                        (id INTEGER PRIMARY KEY, target_property_id INTEGER, address TEXT, sbl TEXT,
-                         sale_price REAL, sale_date TEXT, sqft REAL, acreage REAL, bedrooms REAL,
-                         bathrooms REAL, year_built INTEGER, zpid TEXT, status TEXT DEFAULT 'VERIFIED',
-                         similarity_score REAL, is_outlier INTEGER DEFAULT 0,
-                         assessment_2026 REAL, assessment_2025 REAL, distance_miles REAL,
-                         is_selected INTEGER DEFAULT 0, grade TEXT, condition_code TEXT,
-                         style TEXT, property_class TEXT)''')
-                         
-        cursor.execute("PRAGMA table_info(sales_comps)")
-        cols = {c[1] for c in cursor.fetchall()}
-        if 'similarity_score' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN similarity_score REAL")
-        if 'grade' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN grade TEXT")
-        if 'is_selected' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN is_selected INTEGER DEFAULT 0")
-
+        # Schema is guaranteed by init_schema() at startup + the legacy
+        # SQLite migration block in discover_comps_live. No need to recreate
+        # or check columns here.
         cursor.execute('''INSERT INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, status, assessment_2026, distance_miles, similarity_score, grade, is_selected)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?, ?, ?, ?, 1)''',
                     (property_id, comp_obj['address'], comp_obj['sbl'], comp_obj['sale_price'], comp_obj['sale_date'],

@@ -2,6 +2,7 @@ import re
 import requests
 from app.counties.base import CountyInterface
 from app.exceptions import CountyAPIError
+from app.logging_safe import safe_addr
 
 NYS_PARCELS_URL = "https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/MapServer/1/query"
 
@@ -87,14 +88,14 @@ class UlsterCounty(CountyInterface):
             ) from e
 
         if not feats:
-            print(f"  Ulster NOT FOUND for {number} {street}")
+            print(f"  Ulster NOT FOUND for {safe_addr(f'{number} {street}')}")
             return None
 
         attrs = feats[0]["attributes"]
         swis = attrs.get("SWIS", "")
         sbl = attrs.get("SBL", "")
         identifier = f"{swis}{sbl}"
-        print(f"  Ulster FOUND {attrs.get('PARCEL_ADDR')} in {attrs.get('CITYTOWN_NAME')}")
+        print(f"  Ulster FOUND {safe_addr(attrs.get('PARCEL_ADDR'))} in {attrs.get('CITYTOWN_NAME')}")
         return {
             "parcelgrid": identifier,
             "swis": swis,
