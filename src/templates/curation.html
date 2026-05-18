@@ -115,7 +115,9 @@
                         </div>
                     </td>
                     <td>
-                        <button type="button" class="btn-select" id="sel-{{ loop.index }}" onclick="toggleSelect({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">Select</button>
+                        <button type="button" class="btn-select {% if comp.is_selected %}selected{% endif %}" id="sel-{{ loop.index }}" onclick="toggleSelect({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">
+                            {{ 'Selected' if comp.is_selected else 'Select' }}
+                        </button>
                         <button type="button" class="btn-reject" onclick="openRejectModal({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">Reject</button>
                     </td>
                 </tr>
