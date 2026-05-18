@@ -1,3 +1,4 @@
+from app.db import get_connection
 import sqlite3
 import time
 import os
@@ -71,7 +72,7 @@ class TaxGrieveCore:
                 lat, lon, z = self._geocode(address_string)
                 if lat and lon:
                     try:
-                        conn = sqlite3.connect(self.db_path)
+                        conn = get_connection()
                         c = conn.cursor()
                         c.execute("UPDATE properties SET latitude = COALESCE(latitude, ?), longitude = COALESCE(longitude, ?), zip = COALESCE(zip, ?) WHERE id = ?",
                                   (lat, lon, z, cached['id']))
@@ -142,7 +143,7 @@ class TaxGrieveCore:
         pattern = f"{number} {street}%"
 
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = get_connection()
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
             c.execute("PRAGMA table_info(properties)")
@@ -177,7 +178,7 @@ class TaxGrieveCore:
 
     def ensure_property(self, subject_data):
         """Ensures the subject property exists in the local SQLite cache."""
-        conn = sqlite3.connect(self.db_path)
+        conn = get_connection()
         cursor = conn.cursor()
 
         # 1. ALWAYS ensure table exists first
@@ -274,7 +275,7 @@ class TaxGrieveCore:
         # Ensure sales_comps schema is up to date BEFORE any early returns so
         # downstream SELECTs (in main.py) don't hit missing columns when the
         # API key is absent.
-        conn = sqlite3.connect(self.db_path)
+        conn = get_connection()
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS sales_comps
                         (id INTEGER PRIMARY KEY, target_property_id INTEGER, address TEXT, sbl TEXT,
@@ -325,7 +326,7 @@ class TaxGrieveCore:
              yield {"status": "error", "message": "RAPIDAPI_KEY not found in environment. Add it to .env to enable comp discovery."}
              return
 
-        conn = sqlite3.connect(self.db_path)
+        conn = get_connection()
         cursor = conn.cursor()
 
         yield {"status": "searching", "message": f"Searching market sales for {subject['address']}..."}
@@ -805,7 +806,13 @@ class TaxGrieveCore:
                 bath_adj = (get_val(subject, 'bathrooms') - get_val(comp, 'bathrooms')) * adjs.get('bathroom', 15000.0)
                 bed_adj = (get_val(subject, 'bedrooms') - get_val(comp, 'bedrooms')) * adjs.get('bedroom', 10000.0)
                 comp_year = get_val(comp, 'year_built')
-                age_adj = (subj_year - comp_year) * adjs.get('year_built', 1000.0) if comp_year and subj_year else 0
+                if comp_year and subj_year:
+                    age_diff = subj_year - comp_year
+                    # Cap age difference at 50 years to prevent massive historical penalties
+                    age_diff = max(-50, min(50, age_diff))
+                    age_adj = age_diff * adjs.get('year_built', 1000.0)
+                else:
+                    age_adj = 0
                 
                 # New Adjustments
                 # Finished Basement
@@ -915,34 +922,111 @@ class TaxGrieveCore:
 
     def add_manual_comp(self, property_id, address, price):
         """Verifies and adds a manual comp to the database."""
-        # Look up the subject property's SBL so we route to the right county
-        # even when the manual-comp address omits a town.
-        conn0 = sqlite3.connect(self.db_path)
-        cursor0 = conn0.cursor()
-        cursor0.execute("SELECT sbl FROM properties WHERE id = ?", (property_id,))
-        row0 = cursor0.fetchone()
-        conn0.close()
-        subj_sbl = row0[0] if row0 else None
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Check limit
+        cursor.execute("SELECT COUNT(*) FROM sales_comps WHERE target_property_id = ? AND status = 'MANUAL'", (property_id,))
+        count = cursor.fetchone()[0]
+        if count >= 5:
+            conn.close()
+            return False, "Maximum of 5 manual comps allowed."
 
+        # Look up the subject property
+        cursor.execute("SELECT * FROM properties WHERE id = ?", (property_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False, "Subject property not found."
+        subject = dict(row)
+        subj_sbl = subject.get('sbl')
+        
         county = CountyFactory.get_county_handler(address_string=address, sbl=subj_sbl)
         official_p = county.search_address(address)
-        if not official_p: return False
+        if not official_p: 
+            conn.close()
+            return False, "Address not found in municipal records."
         
         data = county.get_full_rps_data(official_p.get('parcelgrid'))
-        if not data: return False
+        if not data: 
+            conn.close()
+            return False, "Could not fetch property details."
+            
+        import datetime
+        sale_date = datetime.date.today().strftime('%Y-%m-%d')
+            
+        # Calculate distance
+        distance_miles = None
+        comp_lat = data.get('latitude')
+        comp_lon = data.get('longitude')
+        subj_lat = subject.get('latitude')
+        subj_lon = subject.get('longitude')
+        if comp_lat and comp_lon and subj_lat and subj_lon:
+            try:
+                import math
+                lat1 = math.radians(float(subj_lat))
+                lon1 = math.radians(float(subj_lon))
+                lat2 = math.radians(float(comp_lat))
+                lon2 = math.radians(float(comp_lon))
+                dlat = lat2 - lat1
+                dlon = lon2 - lon1
+                a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+                distance_miles = round(2 * 3958.8 * math.asin(math.sqrt(a)), 2)
+            except (TypeError, ValueError):
+                pass
+                
+        # Build comp object to calculate scores
+        comp_obj = {
+            'address': data['address'],
+            'sbl': data['sbl'],
+            'sale_price': float(price),
+            'sale_date': sale_date,
+            'sqft': data.get('sqft', 0),
+            'acreage': data.get('acreage', 0),
+            'bedrooms': data.get('bedrooms', 0),
+            'bathrooms': data.get('bathrooms', 0),
+            'year_built': data.get('year_built', 0),
+            'condition_code': data.get('condition_code', ''),
+            'grade': data.get('grade', ''),
+            'style': data.get('style', ''),
+            'is_selected': 1,
+            'status': 'MANUAL'
+        }
         
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        # Fetch RAR for score calculation
+        try:
+            from app.orpts import OrptsClient
+            orpts_client = OrptsClient()
+            subj_swis = subj_sbl[:6] if subj_sbl else ''
+            rates = orpts_client.get_municipal_rates(subj_swis)
+            rar = rates.get('rar', 100.0)
+        except Exception:
+            rar = 100.0
+            
+        comp_obj['similarity_score'] = self.calculate_similarity(subject, comp_obj, rar=rar)
+        comp_obj['grade'] = self.calculate_similarity_grade(subject, comp_obj)
+        
+        # Insert
         cursor.execute('''CREATE TABLE IF NOT EXISTS sales_comps
                         (id INTEGER PRIMARY KEY, target_property_id INTEGER, address TEXT, sbl TEXT,
                          sale_price REAL, sale_date TEXT, sqft REAL, acreage REAL, bedrooms REAL,
                          bathrooms REAL, year_built INTEGER, zpid TEXT, status TEXT DEFAULT 'VERIFIED',
                          similarity_score REAL, is_outlier INTEGER DEFAULT 0,
-                         assessment_2026 REAL, assessment_2025 REAL, distance_miles REAL)''')
-        cursor.execute('''INSERT INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, status, assessment_2026)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?)''',
-                    (property_id, data['address'], data['sbl'], price, '2025-01-01', data['sqft'], data['acreage'],
-                     data['bedrooms'], data['bathrooms'], data['year_built'], data.get('assessment_2026', 0)))
+                         assessment_2026 REAL, assessment_2025 REAL, distance_miles REAL,
+                         is_selected INTEGER DEFAULT 0, grade TEXT, condition_code TEXT,
+                         style TEXT, property_class TEXT)''')
+                         
+        cursor.execute("PRAGMA table_info(sales_comps)")
+        cols = {c[1] for c in cursor.fetchall()}
+        if 'similarity_score' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN similarity_score REAL")
+        if 'grade' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN grade TEXT")
+        if 'is_selected' not in cols: cursor.execute("ALTER TABLE sales_comps ADD COLUMN is_selected INTEGER DEFAULT 0")
+
+        cursor.execute('''INSERT INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, status, assessment_2026, distance_miles, similarity_score, grade, is_selected)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?, ?, ?, ?, 1)''',
+                    (property_id, comp_obj['address'], comp_obj['sbl'], comp_obj['sale_price'], comp_obj['sale_date'],
+                     comp_obj['sqft'], comp_obj['acreage'], comp_obj['bedrooms'], comp_obj['bathrooms'],
+                     comp_obj['year_built'], data.get('assessment_2026', 0), distance_miles, comp_obj['similarity_score'], comp_obj['grade']))
         conn.commit()
         conn.close()
-        return True
+        return True, "Added successfully."

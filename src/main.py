@@ -352,7 +352,15 @@ async def generate_report(
 
 @app.post("/add_comp")
 async def add_comp(request: Request, property_id: int = Form(...), address: str = Form(...), price: float = Form(...)):
-    success = core.add_manual_comp(property_id, address, price)
+    success, msg = core.add_manual_comp(property_id, address, price)
+    
+    if "application/json" in request.headers.get("accept", ""):
+        from fastapi.responses import JSONResponse
+        if success:
+            return JSONResponse({"status": "success", "message": msg})
+        else:
+            return JSONResponse({"status": "error", "message": msg}, status_code=400)
+            
     if success:
         conn = get_connection()
         cursor = conn.cursor()
@@ -374,7 +382,7 @@ async def add_comp(request: Request, property_id: int = Form(...), address: str 
             </div>
         """)
     else:
-        return HTMLResponse("Failed to verify address on County API. Check spelling.")
+        return HTMLResponse(f"Failed to add comp: {msg}")
 
 def _build_report_context(subject_id: int, renovation_year: int = None, condition: str = "average"):
     conn = get_connection()

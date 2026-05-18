@@ -70,6 +70,11 @@
         <p>Phase 1: Verify your property details.</p>
         
         <div id="search-box" class="form-box">
+            <div id="resume-banner" style="display:none; background: #e3f2fd; padding: 15px; border-radius: 4px; border: 1px solid #1565c0; margin-bottom: 20px; text-align: center;">
+                <p style="margin: 0 0 10px 0; color: #1565c0; font-weight: bold;">You have a saved session.</p>
+                <button onclick="resumeSession()" style="width: auto; padding: 8px 15px; font-size: 14px; background: #1565c0;">Resume Previous Search</button>
+            </div>
+            
             <div class="ac-wrap">
                 <input type="text" id="address" placeholder="e.g. 67 N Parsonage St, Rhinebeck" autocomplete="off" required>
                 <div id="ac-list" role="listbox"></div>
@@ -78,12 +83,7 @@
         </div>
 
         <!-- Step 2: Verification Card -->
-        <div id="verification-step">
-            <details class="explainer">
-                <summary>How Verification Works</summary>
-                <p>Review the details retrieved from the County Database to ensure this is the correct property. If the property has undergone major renovations not reflected in its age, enter the <b>Remodel Year</b> so the algorithm can calculate an effective age.</p>
-                <p>Checking <b>Force Deep Verification</b> forces the system to rigorously cross-reference every discovered comparable sale against the County Database. <i>Note: This process is slower and can take 2-3 minutes to complete.</i></p>
-            </details>
+        <div id="subject-card-container" style="display: none; margin-bottom: 20px;">
             <div class="card">
                 <div class="card-header" onclick="toggleDetails('subject-details')">
                     <h3 class="card-title" id="subject-addr-display">Property Found</h3>
@@ -101,7 +101,16 @@
                         <div class="spec-item"><b>Last Year (2025) Roll</b> <span id="s-ass-25"></span></div>
                     </div>
                 </div>
+                </div>
             </div>
+        </div>
+
+        <div id="verification-step">
+            <details class="explainer">
+                <summary>How Verification Works</summary>
+                <p>Review the details retrieved from the County Database to ensure this is the correct property. If the property has undergone major renovations not reflected in its age, enter the <b>Remodel Year</b> so the algorithm can calculate an effective age.</p>
+                <p>Checking <b>Force Deep Verification</b> forces the system to rigorously cross-reference every discovered comparable sale against the County Database. <i>Note: This process is slower and can take 2-3 minutes to complete.</i></p>
+            </details>
             
             <div style="margin-top: 15px; margin-bottom: 15px;">
                 <label style="font-size: 14px; color: #2c3e50;">
@@ -112,7 +121,7 @@
             
             <div style="margin-top: 15px; margin-bottom: 15px;">
                 <label style="font-size: 14px; color: #2c3e50; cursor: pointer;">
-                    <input type="checkbox" id="force-verify-cb"> Force Deep Verification (Slower, but verifies all comps with County Database)
+                    <input type="checkbox" id="force-verify-cb" checked> Force Deep Verification (Slower, but verifies all comps with County Database)
                 </label>
             </div>
             <p style="font-size:14px; color:#e67e22; font-weight:bold;">Is this the correct property?</p>
@@ -129,9 +138,7 @@
             </details>
             <div id="status-msg" style="margin-bottom: 10px; font-weight: bold;">Preparing discovery...</div>
             <div class="controls">
-                <button id="stop-btn" class="btn-stop" onclick="stopAnalysis()">Stop Discovery</button>
-                <button id="resume-btn" class="btn-resume" onclick="startDiscovery()">Resume Discovery</button>
-                <button id="report-btn" class="btn-report" onclick="startDiscovery(true)">View Final Report</button>
+                <button id="stop-btn" class="btn-stop" onclick="stopAnalysis()" style="background: #e67e22;">Pause & Rank Comps</button>
             </div>
         </div>
 
@@ -305,7 +312,11 @@
                         document.getElementById('s-ass-25').innerText = '$' + currentSubject.assessment_2025.toLocaleString();
                         document.getElementById('s-ass-26').innerText = '$' + (currentSubject.assessment_2026 || 0).toLocaleString();
                         
+                        // Save session token (subject_id)
+                        localStorage.setItem('griever_session_id', currentSubjectId);
+                        
                         document.getElementById('search-box').style.display = 'none';
+                        document.getElementById('subject-card-container').style.display = 'block';
                         document.getElementById('verification-step').style.display = 'block';
                         log.innerHTML += `> Property confirmed: ${currentSubject.address}\n`;
                     } else {
@@ -319,6 +330,7 @@
 
         function resetSearch() {
             document.getElementById('search-box').style.display = 'block';
+            document.getElementById('subject-card-container').style.display = 'none';
             document.getElementById('verification-step').style.display = 'none';
             document.getElementById('search-btn').disabled = false;
             document.getElementById('search-btn').innerText = "Find My Property";
@@ -327,10 +339,13 @@
         function stopAnalysis() {
             if (controller) {
                 controller.abort();
-                document.getElementById('status-msg').innerHTML = "Discovery Paused";
+                document.getElementById('status-msg').innerHTML = "Shifting to Ranking Dashboard...";
                 document.getElementById('stop-btn').style.display = 'none';
-                document.getElementById('resume-btn').style.display = 'block';
-                document.getElementById('report-btn').style.display = 'block';
+                
+                // Immediately transition to the curation dashboard
+                setTimeout(() => {
+                    startDiscovery(true);
+                }, 500);
             }
         }
 
@@ -341,14 +356,10 @@
             document.getElementById('log').style.display = 'block';
             
             if (skipDiscovery) {
-                document.getElementById('status-msg').innerHTML = "Finalizing Report...";
-                document.getElementById('stop-btn').style.display = 'none';
-                document.getElementById('resume-btn').style.display = 'none';
-                document.getElementById('report-btn').style.display = 'none';
+                document.getElementById('status-msg').innerHTML = "Loading Curation Dashboard...";
+                if (document.getElementById('stop-btn')) document.getElementById('stop-btn').style.display = 'none';
             } else {
-                document.getElementById('stop-btn').style.display = 'block';
-                document.getElementById('resume-btn').style.display = 'none';
-                document.getElementById('report-btn').style.display = 'none';
+                if (document.getElementById('stop-btn')) document.getElementById('stop-btn').style.display = 'block';
             }
 
             controller = new AbortController();
@@ -586,6 +597,173 @@
                     </form>
                 </div>
             `;
+        }
+
+        function sortTable(n) {
+            var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+            table = document.getElementById("compsTable");
+            switching = true;
+            dir = "desc"; 
+            while (switching) {
+                switching = false;
+                rows = table.rows;
+                for (i = 1; i < (rows.length - 1); i++) {
+                    shouldSwitch = false;
+                    x = rows[i].getElementsByTagName("TD")[n];
+                    y = rows[i + 1].getElementsByTagName("TD")[n];
+                    
+                    let xVal = x.innerText.replace(/[^0-9.-]+/g,"");
+                    let yVal = y.innerText.replace(/[^0-9.-]+/g,"");
+                    let cmpX = parseFloat(xVal) || x.innerHTML.toLowerCase();
+                    let cmpY = parseFloat(yVal) || y.innerHTML.toLowerCase();
+
+                    if (dir == "asc") {
+                        if (cmpX > cmpY) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    } else if (dir == "desc") {
+                        if (cmpX < cmpY) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    }
+                }
+                if (shouldSwitch) {
+                    rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                    switching = true;
+                    switchcount ++;
+                } else {
+                    if (switchcount == 0 && dir == "desc") {
+                        dir = "asc";
+                        switching = true;
+                    }
+                }
+            }
+        }
+
+        function updatePricing(subjectAddress, subjectId) {
+            const formData = new FormData();
+            formData.append('address', subjectAddress);
+            formData.append('subject_id', subjectId);
+            formData.append('update_curation', 'true');
+            formData.append('renovation_year', document.getElementById('curation-renov').value);
+            formData.append('condition', document.getElementById('curation-cond').value);
+            
+            // Show loading state on table
+            document.querySelector('table').style.opacity = '0.5';
+
+            fetch('/report', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.text())
+            .then(html => {
+                document.body.innerHTML = html;
+            })
+            .catch(error => console.error('Error updating pricing:', error));
+        }
+
+        async function submitManualComp() {
+            const btn = document.getElementById('manual_btn');
+            const msg = document.getElementById('manual_msg');
+            const addr = document.getElementById('manual_address').value;
+            const price = document.getElementById('manual_price').value;
+            const property_id = document.getElementById('manual_property_id').value;
+            const subject_address = document.getElementById('manual_subject_address').value;
+
+            if (!addr || !price) {
+                msg.innerText = 'Please enter both an address and a price.';
+                msg.style.color = '#e74c3c';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = 'Adding...';
+            msg.innerText = 'Verifying address with County records. This may take a moment...';
+            msg.style.color = '#2980b9';
+
+            const formData = new URLSearchParams();
+            formData.append('property_id', property_id);
+            formData.append('address', addr);
+            formData.append('price', price);
+
+            try {
+                const response = await fetch('/add_comp', {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: formData.toString()
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    msg.innerText = 'Success! Reloading table...';
+                    msg.style.color = '#27ae60';
+                    updatePricing(subject_address, property_id);
+                } else {
+                    msg.innerText = 'Error: ' + data.message;
+                    msg.style.color = '#e74c3c';
+                    btn.disabled = false;
+                    btn.innerText = 'Add Comp';
+                }
+            } catch (err) {
+                msg.innerText = 'Network error. Please try again.';
+                msg.style.color = '#e74c3c';
+                btn.disabled = false;
+                btn.innerText = 'Add Comp';
+            }
+        }
+
+        function autoSelectTop3() {
+            const rows = Array.from(document.querySelectorAll('#compsTable tbody tr'));
+            const validRows = rows.filter(row => row.getAttribute('data-outlier') !== 'true');
+            
+            // Sort by score descending
+            validRows.sort((a, b) => parseFloat(b.getAttribute('data-score')) - parseFloat(a.getAttribute('data-score')));
+            
+            const top3 = validRows.slice(0, 3);
+            
+            // Iterate through all rows and click to select/unselect appropriately
+            rows.forEach(row => {
+                const btn = row.querySelector('.btn-select');
+                if (!btn) return;
+                
+                const isSelected = btn.classList.contains('selected');
+                const shouldBeSelected = top3.includes(row);
+                
+                if (isSelected && !shouldBeSelected) {
+                    btn.click();
+                } else if (!isSelected && shouldBeSelected) {
+                    btn.click();
+                }
+            });
+        }
+
+        // Check for saved session on load
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const resumeId = urlParams.get('resume_session');
+            if (resumeId) {
+                currentSubjectId = resumeId;
+                currentSubject = { address: "Saved Session" };
+                startDiscovery(true);
+            } else {
+                const savedSession = localStorage.getItem('griever_session_id');
+                if (savedSession) {
+                    document.getElementById('resume-banner').style.display = 'block';
+                }
+            }
+        });
+
+        function resumeSession() {
+            const savedSession = localStorage.getItem('griever_session_id');
+            if (savedSession) {
+                window.location.href = `/?resume_session=${savedSession}`;
+            }
         }
     </script>
 </body>
