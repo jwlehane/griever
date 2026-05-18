@@ -72,7 +72,7 @@ class TaxGrieveCore:
                 lat, lon, z = self._geocode(address_string)
                 if lat and lon:
                     try:
-                        conn = get_connection()
+                        conn = get_connection(self.db_path)
                         c = conn.cursor()
                         c.execute("UPDATE properties SET latitude = COALESCE(latitude, ?), longitude = COALESCE(longitude, ?), zip = COALESCE(zip, ?) WHERE id = ?",
                                   (lat, lon, z, cached['id']))
@@ -143,7 +143,7 @@ class TaxGrieveCore:
         pattern = f"{number} {street}%"
 
         try:
-            conn = get_connection()
+            conn = get_connection(self.db_path)
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
             c.execute("PRAGMA table_info(properties)")
@@ -178,7 +178,7 @@ class TaxGrieveCore:
 
     def ensure_property(self, subject_data):
         """Ensures the subject property exists in the local SQLite cache."""
-        conn = get_connection()
+        conn = get_connection(self.db_path)
         cursor = conn.cursor()
 
         # 1. ALWAYS ensure table exists first
@@ -275,7 +275,7 @@ class TaxGrieveCore:
         # Ensure sales_comps schema is up to date BEFORE any early returns so
         # downstream SELECTs (in main.py) don't hit missing columns when the
         # API key is absent.
-        conn = get_connection()
+        conn = get_connection(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS sales_comps
                         (id INTEGER PRIMARY KEY, target_property_id INTEGER, address TEXT, sbl TEXT,
@@ -326,7 +326,7 @@ class TaxGrieveCore:
              yield {"status": "error", "message": "RAPIDAPI_KEY not found in environment. Add it to .env to enable comp discovery."}
              return
 
-        conn = get_connection()
+        conn = get_connection(self.db_path)
         cursor = conn.cursor()
 
         yield {"status": "searching", "message": f"Searching market sales for {subject['address']}..."}
@@ -929,7 +929,7 @@ class TaxGrieveCore:
 
     def add_manual_comp(self, property_id, address, price):
         """Verifies and adds a manual comp to the database."""
-        conn = get_connection()
+        conn = get_connection(self.db_path)
         cursor = conn.cursor()
         
         # Check limit

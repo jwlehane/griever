@@ -1,56 +1,91 @@
 import sys
 import os
-import pytest
 
-# Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from app.core import TaxGrieveCore
 
-def test_similarity_identical():
-    core = TaxGrieveCore(db_path=':memory:')
-    subject = {'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'distance_miles': 0}
-    comp = {'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'distance_miles': 0}
-    score = core.calculate_similarity(subject, comp)
-    assert score == 100.0
 
-def test_similarity_different_sqft():
-    core = TaxGrieveCore(db_path=':memory:')
-    subject = {'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'distance_miles': 0}
-    # 10% smaller sqft
-    comp = {'sqft': 1800, 'year_built': 2000, 'acreage': 1.0, 'distance_miles': 0}
-    score = core.calculate_similarity(subject, comp)
-    # Sqft is 40% of total. 10% diff / 20% tolerance = 0.5. 
-    # Sqft component = (1 - 0.5) * 40 = 20. Total = 20 + 30 + 20 + 10 = 80.
-    assert score == 80.0
+def _full_subject():
+    return {
+        'sqft': 2000,
+        'year_built': 2000,
+        'acreage': 1.0,
+        'bedrooms': 3,
+        'bathrooms': 2,
+        'style': 'Colonial',
+        'condition_code': 'avg',
+        'assessment_2025': 400000,
+        'distance_miles': 0,
+    }
 
-def test_similarity_different_age():
+
+def _full_comp(**overrides):
+    base = {
+        'sqft': 2000,
+        'year_built': 2000,
+        'acreage': 1.0,
+        'bedrooms': 3,
+        'bathrooms': 2,
+        'style': 'Colonial',
+        'condition_code': 'avg',
+        'sale_price': 400000,
+        'sale_date': '2024-06-15',
+        'distance_miles': 0,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_similarity_perfect_match_scores_high():
+    """A comp identical to the subject, sold on the valuation date, with a
+    favorable price/sqft, should score in the A range (>= 85). Note: the
+    advantage index defaults to 50/100 when assessment data is absent, so
+    we supply assessment_2025 + a sale_price below target EMV/sqft."""
     core = TaxGrieveCore(db_path=':memory:')
-    subject = {'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'distance_miles': 0}
-    # 25 years older
-    comp = {'sqft': 2000, 'year_built': 1975, 'acreage': 1.0, 'distance_miles': 0}
-    score = core.calculate_similarity(subject, comp)
-    # Age is 30% of total. 25 year diff / 50 year tolerance = 0.5.
-    # Age component = (1 - 0.5) * 30 = 15. Total = 40 + 15 + 20 + 10 = 85.
-    assert score == 85.0
+    # Subject EMV/sqft = 400000/2000 = $200. Comp price/sqft = 300000/2000 = $150,
+    # ratio 0.75 -> advantage = 100 - (0.25*100) = 75.
+    score = core.calculate_similarity(
+        _full_subject(),
+        _full_comp(sale_date='2024-07-01', sale_price=300000),
+    )
+    assert score >= 85, f"perfect match scored only {score}"
+
+
+def test_similarity_gla_penalty_drops_score():
+    """A 25% larger comp should lose all GLA points (max var is 20% in
+    calculate_similarity), pulling the total score down by at least 10."""
+    core = TaxGrieveCore(db_path=':memory:')
+    baseline = core.calculate_similarity(_full_subject(), _full_comp())
+    gla_off = core.calculate_similarity(_full_subject(), _full_comp(sqft=2500))
+    assert gla_off < baseline - 10, f"expected GLA penalty (got {baseline} -> {gla_off})"
+
+
+def test_similarity_age_mismatch_drops_style_points():
+    """An identical comp 50 years older loses the era-match bonus (10 pts in
+    the style component) but keeps everything else, so the score should still
+    drop but only by single digits."""
+    core = TaxGrieveCore(db_path=':memory:')
+    baseline = core.calculate_similarity(_full_subject(), _full_comp())
+    old = core.calculate_similarity(_full_subject(), _full_comp(year_built=1950))
+    assert baseline > old > baseline - 15
+
 
 def test_outlier_detection():
+    """The IQR filter should still flag a 4x-priced comp as an outlier and
+    exclude it from the median."""
     core = TaxGrieveCore(db_path=':memory:')
     subject = {'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3}
-    # Need enough spread for Tukey fence to trigger or more extreme values
     comps = [
         {'address': 'Good 1', 'sale_price': 500000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3},
         {'address': 'Good 2', 'sale_price': 510000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3},
         {'address': 'Good 3', 'sale_price': 490000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3},
-        {'address': 'Outlier', 'sale_price': 2000000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3}
+        {'address': 'Outlier', 'sale_price': 2000000, 'sqft': 2000, 'year_built': 2000, 'acreage': 1.0, 'bathrooms': 2, 'bedrooms': 3},
     ]
-    
+
     result = core.calculate_valuation(subject, comps)
     market_value = result["market_value"]
-    
-    # Outlier should be flagged
+
     outlier_result = next(r for r in result["comps"] if r['address'] == 'Outlier')
     assert outlier_result['is_outlier'] is True
-    
-    # Market value should be based on valid comps only (median of 490, 500, 510 is 500)
     assert market_value == 500000

@@ -8,14 +8,17 @@ if DATABASE_URL:
     import psycopg2
     from psycopg2.extras import RealDictCursor
 
-def get_connection():
+def get_connection(sqlite_path: str = 'grievance_data.db'):
+    """Return a connection. Postgres if DATABASE_URL is set (sqlite_path is
+    ignored in that case), otherwise SQLite at `sqlite_path`. The path arg
+    lets callers (notably tests) target an alternate file."""
     if DATABASE_URL:
         # Connect to Postgres
         conn = psycopg2.connect(DATABASE_URL)
         return PostgresConnection(conn)
     else:
         # Fallback to local SQLite
-        conn = sqlite3.connect('grievance_data.db')
+        conn = sqlite3.connect(sqlite_path)
         conn.row_factory = sqlite3.Row
         return SQLiteConnection(conn)
 
