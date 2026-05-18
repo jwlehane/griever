@@ -368,7 +368,7 @@ async def add_comp(request: Request, property_id: int = Form(...), address: str 
                 <form action="/report" method="post">
                     <input type="hidden" name="address" value="{subject_addr}">
                     <input type="hidden" name="subject_id" value="{property_id}">
-                    <input type="hidden" name="skip_discovery" value="true">
+                    <input type="hidden" name="update_curation" value="true">
                     <button type="submit" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer;">Show Report</button>
                 </form>
             </div>
