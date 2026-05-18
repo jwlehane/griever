@@ -5,7 +5,7 @@ from fastapi.templating import Jinja2Templates
 from app.core import TaxGrieveCore
 from app.utils import send_error_report
 from app.counties.factory import CountyFactory
-import sqlite3
+from app.db import get_connection
 import traceback
 import json
 import re
@@ -200,8 +200,7 @@ async def generate_report(
             if not active_subject_id:
                 return HTMLResponse("Property session lost. Please search again.", status_code=400)
 
-            conn = sqlite3.connect('grievance_data.db')
-            conn.row_factory = sqlite3.Row
+            conn = get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM properties WHERE id = ?", (active_subject_id,))
             row = cursor.fetchone()
@@ -288,8 +287,7 @@ async def generate_report(
                 yield f"data: {json.dumps({'status': 'error', 'message': 'Property session lost. Please search again.'})}\n\n"
                 return
 
-            conn = sqlite3.connect('grievance_data.db')
-            conn.row_factory = sqlite3.Row
+            conn = get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM properties WHERE id = ?", (active_subject_id,))
             row = cursor.fetchone()
@@ -311,8 +309,7 @@ async def generate_report(
                 
                 yield f"data: {json.dumps({'status': 'info', 'message': 'Discovery complete. Preparing curation dashboard...'})}\n\n"
 
-            conn = sqlite3.connect('grievance_data.db')
-            conn.row_factory = sqlite3.Row
+            conn = get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED'", (active_subject_id,))
             comps = [dict(row) for row in cursor.fetchall()]
@@ -357,7 +354,7 @@ async def generate_report(
 async def add_comp(request: Request, property_id: int = Form(...), address: str = Form(...), price: float = Form(...)):
     success = core.add_manual_comp(property_id, address, price)
     if success:
-        conn = sqlite3.connect('grievance_data.db')
+        conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT address FROM properties WHERE id = ?", (property_id,))
         row = cursor.fetchone()
@@ -380,8 +377,7 @@ async def add_comp(request: Request, property_id: int = Form(...), address: str 
         return HTMLResponse("Failed to verify address on County API. Check spelling.")
 
 def _build_report_context(subject_id: int, renovation_year: int = None, condition: str = "average"):
-    conn = sqlite3.connect('grievance_data.db')
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM properties WHERE id = ?", (subject_id,))
     row = cursor.fetchone()
@@ -439,12 +435,19 @@ def _build_report_context(subject_id: int, renovation_year: int = None, conditio
 
 
 @app.get("/grievance/rp524.pdf")
-async def grievance_rp524(subject_id: int, renovation_year: int = None, condition: str = "average"):
+async def grievance_rp524(subject_id: int, renovation_year: int = None, condition: str = "average",
+                          owner_name: str = None, owner_address: str = None, owner_email: str = None, owner_phone: str = None):
     from fastapi.responses import Response
     from app.pdf_gen import render_rp524
     ctx = _build_report_context(subject_id, renovation_year, condition)
     if not ctx:
         return JSONResponse({"error": "Property not found"}, status_code=404)
+    ctx.update({
+        "owner_name": owner_name,
+        "owner_address": owner_address,
+        "owner_email": owner_email,
+        "owner_phone": owner_phone
+    })
     pdf_bytes = render_rp524(ctx)
     safe = (ctx["subject"].get("address") or "subject").replace("/", "-").replace(" ", "_")
     return Response(content=pdf_bytes, media_type="application/pdf",
@@ -465,13 +468,20 @@ async def grievance_methodology(subject_id: int, renovation_year: int = None, co
 
 
 @app.get("/grievance/package.zip")
-async def grievance_package(subject_id: int, renovation_year: int = None, condition: str = "average"):
+async def grievance_package(subject_id: int, renovation_year: int = None, condition: str = "average",
+                            owner_name: str = None, owner_address: str = None, owner_email: str = None, owner_phone: str = None):
     from fastapi.responses import Response
     from app.pdf_gen import render_rp524, render_methodology
     import zipfile, io
     ctx = _build_report_context(subject_id, renovation_year, condition)
     if not ctx:
         return JSONResponse({"error": "Property not found"}, status_code=404)
+    ctx.update({
+        "owner_name": owner_name,
+        "owner_address": owner_address,
+        "owner_email": owner_email,
+        "owner_phone": owner_phone
+    })
     rp524 = render_rp524(ctx)
     method = render_methodology(ctx)
 
@@ -523,8 +533,7 @@ async def grievance_package(subject_id: int, renovation_year: int = None, condit
 @app.get("/bar_info")
 async def bar_info(subject_id: int):
     from app.bar_info import get_bar
-    conn = sqlite3.connect('grievance_data.db')
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT sbl FROM properties WHERE id = ?", (subject_id,))
     row = cursor.fetchone()
@@ -542,7 +551,7 @@ async def bar_info(subject_id: int):
 
 @app.post("/select_comp")
 async def select_comp(property_id: int = Form(...), zpid: str = Form(None), address: str = Form(None)):
-    conn = sqlite3.connect('grievance_data.db')
+    conn = get_connection()
     cursor = conn.cursor()
     if zpid:
         cursor.execute("UPDATE sales_comps SET is_selected = 1 WHERE target_property_id = ? AND zpid = ?", (property_id, zpid))
@@ -555,7 +564,7 @@ async def select_comp(property_id: int = Form(...), zpid: str = Form(None), addr
 
 @app.post("/unselect_comp")
 async def unselect_comp(property_id: int = Form(...), zpid: str = Form(None), address: str = Form(None)):
-    conn = sqlite3.connect('grievance_data.db')
+    conn = get_connection()
     cursor = conn.cursor()
     if zpid:
         cursor.execute("UPDATE sales_comps SET is_selected = 0 WHERE target_property_id = ? AND zpid = ?", (property_id, zpid))
@@ -568,7 +577,7 @@ async def unselect_comp(property_id: int = Form(...), zpid: str = Form(None), ad
 
 @app.post("/reject_comp")
 async def reject_comp(request: Request, property_id: int = Form(...), address: str = Form(...), zpid: str = Form(None), reason: str = Form(None)):
-    conn = sqlite3.connect('grievance_data.db')
+    conn = get_connection()
     cursor = conn.cursor()
     if zpid:
         cursor.execute("UPDATE sales_comps SET status = 'REJECTED', rejection_reason = ? WHERE target_property_id = ? AND zpid = ?", (reason, property_id, zpid))
