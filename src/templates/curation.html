@@ -131,10 +131,12 @@
             <div id="manual-comp-form">
                 <input type="hidden" id="manual_property_id" value="{{ subject_id }}">
                 <input type="hidden" id="manual_subject_address" value="{{ subject.address|escape }}">
-                <div style="display: flex; gap: 10px;">
-                    <input type="text" id="manual_address" placeholder="Property Address (e.g. 123 Main St)" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" required>
-                    <input type="number" id="manual_price" placeholder="Sale Price ($)" style="width: 150px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" required>
-                    <button type="button" id="manual_btn" onclick="submitManualComp()" style="padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Add Comp</button>
+                <div style="margin-bottom: 15px;">
+                    <input type="text" id="manual_address" placeholder="Property Address (e.g. 123 Main St)" style="width: calc(100% - 22px); padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box; display: block; margin-bottom: 10px;">
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="number" id="manual_price" placeholder="Sale Price ($)" style="width: 200px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <button type="button" id="manual_btn" onclick="submitManualComp()" style="padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Add Comp</button>
+                    </div>
                 </div>
                 <div id="manual_msg" style="margin-top: 10px; font-size: 13px;"></div>
             </div>
