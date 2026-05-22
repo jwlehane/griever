@@ -1,4 +1,5 @@
 .git
+.env
 tax-grieve-env
 __pycache__
 *.pyc
