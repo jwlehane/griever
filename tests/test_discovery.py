@@ -54,7 +54,8 @@ def test_hard_filter_uses_current_roll_valuation_date():
     }
 
     assert core._passes_hard_filters(subject, _full_comp(sale_date='2025-07-01', sbl='UNVERIFIED')) == (True, '')
-    assert core._passes_hard_filters(subject, _full_comp(sale_date='2024-07-01', sbl='UNVERIFIED')) == (
+    assert core._passes_hard_filters(subject, _full_comp(sale_date='2026-01-05', sbl='UNVERIFIED')) == (True, '')
+    assert core._passes_hard_filters(subject, _full_comp(sale_date='2024-06-30', sbl='UNVERIFIED')) == (
         False,
         'Sale date outside 12-month window',
     )

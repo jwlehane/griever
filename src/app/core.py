@@ -679,7 +679,9 @@ class TaxGrieveCore:
                 if subj_swis != comp_swis:
                     return False, "Crosses Town/Village boundary"
 
-        # 2. Temporal Rule: ±6 months of the active roll valuation date.
+        # 2. Temporal Rule: keep sales within 12 months of the active roll
+        # valuation date. Date proximity is still scored separately, so sales
+        # close to July 1 rank above outer-window comps.
         if valuation_date is None:
             valuation_date = self.get_valuation_date(subject)
         elif isinstance(valuation_date, str):
@@ -689,7 +691,7 @@ class TaxGrieveCore:
             try:
                 s_date = dt.datetime.strptime(sale_date, '%Y-%m-%d').date()
                 delta = abs((s_date - valuation_date).days)
-                if delta > 183: # ~6 months
+                if delta > 365:
                     return False, "Sale date outside 12-month window"
             except ValueError:
                 pass
