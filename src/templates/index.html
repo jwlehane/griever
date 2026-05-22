@@ -179,6 +179,10 @@
                 <input type="text" id="address" placeholder="e.g. 67 N Parsonage St, Rhinebeck" autocomplete="off" required>
                 <div id="ac-list" role="listbox"></div>
             </div>
+            <input type="hidden" id="selected-parcelgrid">
+            <input type="hidden" id="selected-sbl">
+            <input type="hidden" id="selected-county">
+            <input type="hidden" id="selected-zip">
             <button id="search-btn" onclick="searchProperty()">Find My Property</button>
         </div>
 
@@ -278,11 +282,16 @@
         let controller;
         let currentSubject;
         let currentSubjectId;
+        let selectedAddressSuggestion = null;
 
         // ---------- Address autocomplete ----------
         (function setupAutocomplete() {
             const input = document.getElementById('address');
             const list = document.getElementById('ac-list');
+            const parcelgridInput = document.getElementById('selected-parcelgrid');
+            const sblInput = document.getElementById('selected-sbl');
+            const countyInput = document.getElementById('selected-county');
+            const zipInput = document.getElementById('selected-zip');
             let debounceTimer = null;
             let activeIdx = -1;
             let currentItems = [];
@@ -290,6 +299,13 @@
             let inFlight = null;
 
             function hide() { list.style.display = 'none'; activeIdx = -1; }
+            function setSelectedSuggestion(item) {
+                selectedAddressSuggestion = item || null;
+                parcelgridInput.value = item?.parcelgrid || '';
+                sblInput.value = item?.sbl || '';
+                countyInput.value = item?.county || '';
+                zipInput.value = item?.zip || '';
+            }
             function render(items, hint) {
                 if (hint) {
                     list.innerHTML = `<div class="ac-hint">${hint}</div>`;
@@ -321,6 +337,7 @@
                 const it = currentItems[idx];
                 if (!it) return;
                 input.value = it.value;
+                setSelectedSuggestion(it);
                 hide();
             }
             async function fetchSuggestions(q) {
@@ -342,6 +359,7 @@
             }
             input.addEventListener('input', () => {
                 const q = input.value.trim();
+                setSelectedSuggestion(null);
                 lastQuery = q;
                 clearTimeout(debounceTimer);
                 if (!/^\d+\s+\S/.test(q)) {
@@ -392,6 +410,14 @@
 
             const formData = new FormData();
             formData.append('address', addr);
+            const parcelgrid = document.getElementById('selected-parcelgrid').value;
+            const sbl = document.getElementById('selected-sbl').value;
+            const county = document.getElementById('selected-county').value;
+            const zip = document.getElementById('selected-zip').value;
+            if (parcelgrid) formData.append('parcelgrid', parcelgrid);
+            if (sbl) formData.append('sbl', sbl);
+            if (county) formData.append('county', county);
+            if (zip) formData.append('zip_code', zip);
 
             fetch('/search_property', { method: 'POST', body: formData })
                 .then(r => r.json())
@@ -433,6 +459,11 @@
             document.getElementById('verification-step').style.display = 'none';
             document.getElementById('search-btn').disabled = false;
             document.getElementById('search-btn').innerText = "Find My Property";
+            selectedAddressSuggestion = null;
+            document.getElementById('selected-parcelgrid').value = '';
+            document.getElementById('selected-sbl').value = '';
+            document.getElementById('selected-county').value = '';
+            document.getElementById('selected-zip').value = '';
         }
 
         function stopAnalysis() {

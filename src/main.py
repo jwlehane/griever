@@ -5,6 +5,8 @@ from fastapi.templating import Jinja2Templates
 from app.core import TaxGrieveCore
 from app.utils import send_error_report, init_sentry
 from app.counties.factory import CountyFactory
+from app.counties.dutchess import DutchessCounty
+from app.counties.ulster import UlsterCounty
 from app.db import get_connection, init_schema
 from app.tos_gate import COOKIE_NAME as TOS_COOKIE, TTL_SECONDS as TOS_TTL, make_cookie as make_tos_cookie, require_tos_accepted
 import traceback
@@ -100,24 +102,61 @@ def _county_for_zip(zip5: str) -> str:
     return ""
 
 
-@app.get("/autocomplete")
-@limiter.limit("180/minute")
-async def autocomplete(request: Request, q: str = ""):
-    """Address suggestions for Dutchess + Ulster.
+def _format_autocomplete_value(address: str, town: str, zip5: str = "") -> str:
+    parts = [p for p in [address, town, "NY"] if p]
+    value = ", ".join(parts)
+    return f"{value} {zip5}".strip() if zip5 else value
 
-    Backed by the US Census Geocoder (fast, ~200ms). Filters results to ZIP
-    codes within Dutchess or Ulster County. Triggers once the user has typed
-    a house number + at least 3 street chars.
-    """
-    q = (q or "").strip()
-    m = re.match(r"^\s*(\d+)\s+(\S.{2,})$", q)
-    if not m:
-        return JSONResponse({"suggestions": []})
 
-    cache_key = q.upper()
-    if cache_key in _AC_CACHE:
-        return JSONResponse({"suggestions": _AC_CACHE[cache_key]})
+def _normalize_parcel_suggestion(item: dict) -> dict:
+    address = (item.get("address") or "").strip()
+    town = (item.get("town") or "").strip()
+    zip5 = (item.get("zip") or "").strip()[:5]
+    if not zip5 and address and town:
+        _, _, zip5 = core._geocode(f"{address}, {town}, NY")
+        zip5 = (zip5 or "").strip()[:5]
+    county = item.get("county") or _county_for_zip(zip5) or ""
+    label = _format_autocomplete_value(address, town, zip5)
+    return {
+        "label": label,
+        "value": label,
+        "address": address,
+        "town": town,
+        "county": county,
+        "zip": zip5,
+        "parcelgrid": item.get("parcelgrid") or item.get("sbl") or "",
+        "sbl": item.get("sbl") or item.get("parcelgrid") or "",
+        "swis": item.get("swis") or "",
+        "source": "parcel",
+    }
 
+
+def _parcel_autocomplete(q: str, limit: int = 8) -> list[dict]:
+    detected = CountyFactory.detect_county(address_string=q)
+    handlers = [UlsterCounty(timeout=4)] if detected == "ulster" else [DutchessCounty()]
+
+    suggestions = []
+    seen = set()
+    for handler in handlers:
+        if not hasattr(handler, "suggest_addresses"):
+            continue
+        try:
+            for item in handler.suggest_addresses(q, limit=limit):
+                normalized = _normalize_parcel_suggestion(item)
+                key = normalized.get("parcelgrid") or (normalized["address"].upper(), normalized.get("zip"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                suggestions.append(normalized)
+                if len(suggestions) >= limit:
+                    return suggestions
+        except Exception as e:
+            print(f"parcel autocomplete error: {e}")
+    return suggestions
+
+
+def _census_autocomplete(q: str, limit: int = 8, existing_keys=None) -> tuple[list[dict], str]:
+    existing_keys = existing_keys or set()
     address_query = q if re.search(r"\bNY\b", q, re.IGNORECASE) else f"{q}, NY"
     try:
         resp = requests.get(
@@ -129,10 +168,10 @@ async def autocomplete(request: Request, q: str = ""):
         matches = resp.json().get("result", {}).get("addressMatches", []) or []
     except Exception as e:
         print(f"autocomplete error: {e}")
-        return JSONResponse({"suggestions": [], "error": str(e)})
+        return [], str(e)
 
     suggestions = []
-    seen = set()
+    seen = set(existing_keys)
     for mm in matches:
         comp = mm.get("addressComponents", {}) or {}
         state = (comp.get("state") or "").upper()
@@ -152,35 +191,83 @@ async def autocomplete(request: Request, q: str = ""):
         if key in seen:
             continue
         seen.add(key)
+        value = _format_autocomplete_value(street, city, zipc)
         suggestions.append({
-            "label": matched.title(),
-            "value": f"{street}, {city}",
+            "label": value,
+            "value": value,
             "address": street,
             "town": city,
             "county": county,
             "zip": zipc,
+            "parcelgrid": "",
+            "sbl": "",
+            "source": "census",
         })
-        if len(suggestions) >= 8:
+        if len(suggestions) >= limit:
             break
+    return suggestions, ""
+
+
+@app.get("/autocomplete")
+@limiter.limit("180/minute")
+async def autocomplete(request: Request, q: str = ""):
+    """Address suggestions for Dutchess + Ulster.
+
+    Parcel-backed suggestions come first so the selected result can carry an
+    authoritative SBL into /search_property. Census Geocoder results remain as
+    a fallback for broad/no-town queries and ZIP normalization.
+    """
+    q = (q or "").strip()
+    m = re.match(r"^\s*(\d+)\s+(\S.{2,})$", q)
+    if not m:
+        return JSONResponse({"suggestions": []})
+
+    cache_key = q.upper()
+    if cache_key in _AC_CACHE:
+        return JSONResponse({"suggestions": _AC_CACHE[cache_key]})
+
+    suggestions = _parcel_autocomplete(q, limit=8)
+    existing_keys = {(s["address"].upper(), s.get("zip")) for s in suggestions}
+    if len(suggestions) < 8:
+        census_items, census_error = _census_autocomplete(q, limit=8 - len(suggestions), existing_keys=existing_keys)
+        suggestions.extend(census_items)
+    else:
+        census_error = ""
 
     if len(_AC_CACHE) >= _AC_CACHE_MAX:
         _AC_CACHE.pop(next(iter(_AC_CACHE)))
     _AC_CACHE[cache_key] = suggestions
-    return JSONResponse({"suggestions": suggestions})
+    body = {"suggestions": suggestions}
+    if not suggestions and census_error:
+        body["error"] = census_error
+    return JSONResponse(body)
 
 @app.post("/search_property")
 @limiter.limit("30/hour")
-async def search_property(request: Request, address: str = Form(...)):
+async def search_property(
+    request: Request,
+    address: str = Form(...),
+    parcelgrid: str = Form(None),
+    sbl: str = Form(None),
+    county: str = Form(None),
+    zip_code: str = Form(None),
+):
     try:
-        subject = core.get_subject_profile(address.strip())
+        address = address.strip()
+        identifier = (parcelgrid or sbl or "").strip()
+        zip_code = (zip_code or "").strip()[:5] or None
+        if identifier:
+            subject = core.get_subject_profile_by_identifier(identifier, address_string=address, zip_code=zip_code)
+        else:
+            subject = core.get_subject_profile(address)
         if not subject:
             return {"status": "error", "message": f"Property not found: {address}"}
         
         subject_id = core.ensure_property(subject)
         # SBL-based routing is authoritative — it embeds the SWIS code which
         # tells us the actual county regardless of what was typed.
-        county = CountyFactory.get_county_handler(address_string=address, sbl=subject.get('sbl'))
-        subject['town'] = county.get_town_from_identifier(subject['sbl'])
+        county_handler = CountyFactory.get_county_handler(address_string=address, zip_code=zip_code, sbl=subject.get('sbl'))
+        subject['town'] = county_handler.get_town_from_identifier(subject['sbl'])
         
         return {
             "status": "success",

@@ -7,11 +7,58 @@ from app.logging_safe import safe_addr
 
 API_BASE_URL = "https://gis.dutchessny.gov/parcelaccess/asp"
 
+_DIRECTION_WORDS = {
+    "NORTH": "N",
+    "SOUTH": "S",
+    "EAST": "E",
+    "WEST": "W",
+}
+
+_SUFFIXES = [
+    " STREET", " ST", " ROAD", " RD", " AVENUE", " AVE", " DRIVE", " DR",
+    " LANE", " LN", " COURT", " CT", " PLACE", " PL", " TURNPIKE", " TPKE",
+    " BOULEVARD", " BLVD",
+]
+
+
+def _get_f(source, key, default=""):
+    return source.get(key, source.get(key.lower(), source.get(key.upper(), default)))
+
+
+def _clean_street_parts(street_part: str):
+    clean_street = re.sub(r"\s+", " ", (street_part or "").upper().strip())
+    for word, abbr in _DIRECTION_WORDS.items():
+        if clean_street.startswith(f"{word} "):
+            clean_street = clean_street.replace(f"{word} ", f"{abbr} ", 1)
+            break
+
+    street_base = clean_street
+    for suffix in _SUFFIXES:
+        if clean_street.endswith(suffix):
+            street_base = clean_street[:len(clean_street)-len(suffix)].strip()
+            break
+
+    predir = ""
+    street_no_dir = street_base
+    if street_base.startswith(("N ", "S ", "E ", "W ")):
+        predir, street_no_dir = street_base[0], street_base[2:]
+
+    street_options = [clean_street, street_base]
+    if street_no_dir != street_base:
+        street_options.append(street_no_dir)
+
+    seen = set()
+    return predir, [x for x in street_options if x and not (x in seen or seen.add(x))]
+
+
 class DutchessCounty(CountyInterface):
     def __init__(self):
         self.session = requests.Session()
         # Initialize session to get cookies if necessary
-        self.session.get("https://gis.dutchessny.gov/parcelaccess/")
+        try:
+            self.session.get("https://gis.dutchessny.gov/parcelaccess/", timeout=5)
+        except requests.RequestException:
+            pass
         self.headers = {
             "Referer": "https://gis.dutchessny.gov/parcelaccess/",
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -42,31 +89,8 @@ class DutchessCounty(CountyInterface):
         
         street_part = raw_input[len(number):].split(',')[0].strip()
         
-        clean_street = street_part
-        if clean_street.startswith("NORTH "): clean_street = clean_street.replace("NORTH ", "N ", 1)
-        elif clean_street.startswith("SOUTH "): clean_street = clean_street.replace("SOUTH ", "S ", 1)
-        elif clean_street.startswith("EAST "): clean_street = clean_street.replace("EAST ", "E ", 1)
-        elif clean_street.startswith("WEST "): clean_street = clean_street.replace("WEST ", "W ", 1)
-
-        suffixes = [" STREET", " ST", " ROAD", " RD", " AVENUE", " AVE", " DRIVE", " DR", " LANE", " LN", " COURT", " CT", " PLACE", " PL", " TURNPIKE", " TPKE"]
-        street_base = clean_street
-        has_suffix = False
-        for s in suffixes:
-            if clean_street.endswith(s):
-                street_base = clean_street[:len(clean_street)-len(s)].strip()
-                has_suffix = True
-                break
-
-        predir = ""
-        street_no_dir = street_base
-        if street_base.startswith("N "): 
-            predir, street_no_dir = "N", street_base[2:]
-        elif street_base.startswith("S "): 
-            predir, street_no_dir = "S", street_base[2:]
-        elif street_base.startswith("E "): 
-            predir, street_no_dir = "E", street_base[2:]
-        elif street_base.startswith("W "): 
-            predir, street_no_dir = "W", street_base[2:]
+        predir, street_options = _clean_street_parts(street_part)
+        clean_street = street_options[0]
 
         # --- OPTIMIZED SWIS SELECTION ---
         swis_options = []
@@ -85,18 +109,6 @@ class DutchessCounty(CountyInterface):
             if not swis_options:
                 swis_options = list(self.swis_map.keys())
 
-        # Street options should include:
-        # 1. The cleaned street (with 'N ', 'ST', etc. potentially still in it)
-        # 2. The street base (suffix removed)
-        # 3. If a predir was found, the street base WITHOUT the predir
-        street_options = [clean_street, street_base]
-        if street_no_dir != street_base:
-            street_options.append(street_no_dir)
-        
-        # Deduplicate while preserving order
-        seen = set()
-        street_options = [x for x in street_options if not (x in seen or seen.add(x))]
-        
         print(f"DEBUG: Searching {safe_addr(f'{number} {clean_street}')} in {len(swis_options)} towns...")
 
         for s in swis_options:
@@ -134,6 +146,84 @@ class DutchessCounty(CountyInterface):
                         pass
         print(f"  NOT FOUND")
         return None
+
+    def suggest_addresses(self, address_string: str, limit: int = 8) -> list[dict]:
+        """Return parcel-backed address suggestions for autocomplete."""
+        raw_input = address_string.upper().strip()
+        match_num = re.match(r'^(\d+)', raw_input)
+        if not match_num:
+            return []
+
+        number = match_num.group(1)
+        street_part = raw_input[len(number):].split(',')[0].strip()
+        if len(street_part) < 3:
+            return []
+
+        predir, street_options = _clean_street_parts(street_part)
+
+        swis_options = []
+        for code, name in self.swis_map.items():
+            if name.upper() in raw_input:
+                swis_options.append(code)
+
+        # Avoid autocomplete fan-out across every Dutchess municipality while
+        # the user is still typing. Census fallback covers no-town queries.
+        if not swis_options:
+            return []
+
+        suggestions = []
+        seen = set()
+        for swis in swis_options:
+            for street in street_options:
+                attempts = [{'number': number, 'street': street.strip(), 'predir': predir, 'swis': swis}]
+                if predir:
+                    attempts.append({'number': number, 'street': street.strip(), 'swis': swis})
+                for params in attempts:
+                    try:
+                        resp = self.session.get(
+                            f"{API_BASE_URL}/search_extract_addresses.asp",
+                            params=params,
+                            headers=self.headers,
+                            timeout=4,
+                        )
+                        resp.raise_for_status()
+                        payload = resp.json()
+                        rows = payload.get('data', []) if payload.get('success') else []
+                    except Exception:
+                        rows = []
+
+                    for row in rows:
+                        parcelgrid = row.get('parcelgrid') or row.get('id')
+                        if not parcelgrid or parcelgrid in seen:
+                            continue
+                        seen.add(parcelgrid)
+                        if 'parcelgrid' not in row:
+                            row['parcelgrid'] = parcelgrid
+
+                        addr = self._format_search_address(row)
+                        town = (_get_f(row, 'loc_muni_name') or _get_f(row, 'muni_name') or self.swis_map.get(str(_get_f(row, 'swis')), "")).title()
+                        zipc = str(_get_f(row, 'loc_zip') or _get_f(row, 'zip') or "").strip()[:5]
+                        suggestions.append({
+                            "address": addr,
+                            "town": town,
+                            "county": "Dutchess",
+                            "zip": zipc,
+                            "parcelgrid": parcelgrid,
+                            "sbl": parcelgrid,
+                            "swis": str(_get_f(row, 'swis') or parcelgrid[:6]),
+                        })
+                        if len(suggestions) >= limit:
+                            return suggestions
+        return suggestions
+
+    def _format_search_address(self, row: dict) -> str:
+        fallback = _get_f(row, 'address') or _get_f(row, 'full_address') or _get_f(row, 'label')
+        nbr = str(_get_f(row, 'loc_st_nbr', '')).strip()
+        pre = str(_get_f(row, 'loc_st_dir', '') or _get_f(row, 'Loc_st_dir', '')).strip()
+        name = str(_get_f(row, 'loc_st_name', '')).strip()
+        suff = str(_get_f(row, 'loc_mail_st_suff', '') or _get_f(row, 'Loc_mail_st_suff', '')).strip()
+        parts = [p for p in [nbr, pre, name, suff] if p]
+        return (" ".join(parts) or str(fallback or "")).title()
 
     @retry(
         stop=stop_after_attempt(3), 

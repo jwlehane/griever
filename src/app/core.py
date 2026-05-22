@@ -107,9 +107,12 @@ class TaxGrieveCore:
         """Return (lat, lon, zip) using the US Census Geocoder, or (None, None, None)."""
         try:
             import requests
+            query = address_string or ""
+            if not re.search(r"\bNY\b|\bNEW YORK\b", query, re.IGNORECASE):
+                query = f"{query}, NY"
             r = requests.get(
                 "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress",
-                params={"address": f"{address_string}, NY", "benchmark": "Public_AR_Current", "format": "json"},
+                params={"address": query, "benchmark": "Public_AR_Current", "format": "json"},
                 timeout=5,
             )
             r.raise_for_status()
@@ -121,6 +124,97 @@ class TaxGrieveCore:
         except Exception:
             pass
         return None, None, None
+
+    def _finish_subject_profile(self, profile, identifier, county, address_string=None, zip_code=None):
+        """Fill county profile gaps with market and geocode data."""
+        if not profile:
+            return None
+
+        profile['sbl'] = profile.get('sbl') or identifier
+        town = county.get_town_from_identifier(identifier)
+        lookup_address = address_string or f"{profile.get('address', '')}, {town}"
+
+        # Recover missing building data and historical assessment via RapidAPI.
+        if profile.get('sqft', 0) == 0 or profile.get('bedrooms', 0) == 0 or profile.get('assessment_2025', 0) == 0:
+            try:
+                market_data = self._fetch_rapidapi_comps(f"{profile['address']}, {town}, NY", 0, 99)
+                if market_data:
+                    md = market_data[0]
+                    rf = md.get('resoFacts', {})
+                    if profile.get('sqft', 0) == 0:
+                        profile['sqft'] = md.get('livingArea', md.get('area', 0))
+                    if profile.get('bedrooms', 0) == 0:
+                        profile['bedrooms'] = md.get('bedrooms', md.get('beds', 0))
+                    if profile.get('bathrooms', 0) == 0:
+                        profile['bathrooms'] = md.get('bathrooms', md.get('baths', 0))
+                    if profile.get('year_built', 0) == 0:
+                        profile['year_built'] = md.get('yearBuilt', md.get('year_built', 0))
+
+                    if profile.get('assessment_2025', 0) == 0:
+                        profile['assessment_2025'] = rf.get('taxAssessedValue', md.get('taxAssessedValue', 0))
+            except Exception:
+                pass
+
+        # Geocode for distance math + ZIP-based scoping later.
+        lat, lon, zipc = self._geocode(lookup_address)
+        if lat is not None and lon is not None:
+            profile['latitude'] = lat
+            profile['longitude'] = lon
+        if zipc:
+            profile['zip'] = zipc
+        elif zip_code:
+            profile['zip'] = zip_code[:5]
+
+        return profile
+
+    def _lookup_cached_subject_by_sbl(self, identifier):
+        try:
+            conn = get_connection(self.db_path)
+            c = conn.cursor()
+            if not column_exists(c, 'properties', 'sbl'):
+                conn.close()
+                return None
+            c.execute("SELECT * FROM properties WHERE sbl = ?", (identifier,))
+            row = c.fetchone()
+            conn.close()
+            return dict(row) if row else None
+        except Exception:
+            return None
+
+    def get_subject_profile_by_identifier(self, identifier, address_string=None, zip_code=None):
+        """Resolve a subject directly from an authoritative parcel identifier."""
+        identifier = (identifier or "").strip()
+        if not identifier:
+            return None
+
+        cached = self._lookup_cached_subject_by_sbl(identifier)
+        if cached:
+            if (not cached.get('latitude') or not cached.get('longitude')) and address_string:
+                lat, lon, z = self._geocode(address_string)
+                if lat and lon:
+                    try:
+                        conn = get_connection(self.db_path)
+                        c = conn.cursor()
+                        c.execute(
+                            "UPDATE properties SET latitude = COALESCE(latitude, ?), longitude = COALESCE(longitude, ?), zip = COALESCE(zip, ?) WHERE id = ?",
+                            (lat, lon, z or zip_code, cached['id'])
+                        )
+                        conn.commit()
+                        conn.close()
+                        cached['latitude'] = cached.get('latitude') or lat
+                        cached['longitude'] = cached.get('longitude') or lon
+                        cached['zip'] = cached.get('zip') or z or zip_code
+                    except sqlite3.Error:
+                        pass
+            return cached
+
+        county = CountyFactory.get_county_handler(
+            address_string=address_string,
+            zip_code=zip_code,
+            sbl=identifier,
+        )
+        profile = county.get_full_rps_data(identifier)
+        return self._finish_subject_profile(profile, identifier, county, address_string, zip_code)
 
     def _fetch_rapidapi_comps(self, location, beds_min, beds_max, status=None):
         import requests
@@ -203,36 +297,8 @@ class TaxGrieveCore:
         profile = county.get_full_rps_data(identifier)
         if not profile: return None
 
-        # 3. Recover missing building data and historical assessment via RapidAPI
-        if profile.get('sqft', 0) == 0 or profile.get('bedrooms', 0) == 0 or profile.get('assessment_2025', 0) == 0:
-            try:
-                town = county.get_town_from_identifier(identifier)
-                market_data = self._fetch_rapidapi_comps(f"{profile['address']}, {town}, NY", 0, 99)
-                if market_data:
-                    md = market_data[0]
-                    rf = md.get('resoFacts', {})
-                    if profile.get('sqft', 0) == 0:
-                        profile['sqft'] = md.get('livingArea', md.get('area', 0))
-                    if profile.get('bedrooms', 0) == 0:
-                        profile['bedrooms'] = md.get('bedrooms', md.get('beds', 0))
-                    if profile.get('bathrooms', 0) == 0:
-                        profile['bathrooms'] = md.get('bathrooms', md.get('baths', 0))
-                    if profile.get('year_built', 0) == 0:
-                        profile['year_built'] = md.get('yearBuilt', md.get('year_built', 0))
-                    
-                    if profile.get('assessment_2025', 0) == 0:
-                        profile['assessment_2025'] = rf.get('taxAssessedValue', md.get('taxAssessedValue', 0))
-            except: pass
-
-        # 4. Geocode for distance math + ZIP-based scoping later
-        lat, lon, zipc = self._geocode(address_string)
-        if lat is not None and lon is not None:
-            profile['latitude'] = lat
-            profile['longitude'] = lon
-        if zipc:
-            profile['zip'] = zipc
-
-        return profile
+        zip_code = official_p.get('zip') or official_p.get('loc_zip')
+        return self._finish_subject_profile(profile, identifier, county, address_string, zip_code)
 
     def _lookup_cached_subject(self, address_string):
         """Return a cached subject dict matching the leading "<num> <street>"
