@@ -37,6 +37,40 @@ def _full_comp(**overrides):
     return base
 
 
+def test_roll_year_drives_valuation_date():
+    core = TaxGrieveCore(db_path=':memory:')
+    assert core.get_roll_year({'assessment_2025': 400000}) == 2025
+    assert core.get_roll_year({'assessment_2025': 400000, 'assessment_2026': 425000}) == 2026
+    assert core.get_valuation_date({'assessment_2026': 425000}).isoformat() == '2025-07-01'
+    assert core.get_current_assessment({'assessment_2025': 400000, 'assessment_2026': 425000}) == 425000
+
+
+def test_hard_filter_uses_current_roll_valuation_date():
+    core = TaxGrieveCore(db_path=':memory:')
+    subject = {
+        'sbl': '13508900000000000000000000',
+        'sqft': 2000,
+        'assessment_2026': 425000,
+    }
+
+    assert core._passes_hard_filters(subject, _full_comp(sale_date='2025-07-01', sbl='UNVERIFIED')) == (True, '')
+    assert core._passes_hard_filters(subject, _full_comp(sale_date='2024-07-01', sbl='UNVERIFIED')) == (
+        False,
+        'Sale date outside 12-month window',
+    )
+
+
+def test_similarity_uses_current_roll_valuation_date():
+    core = TaxGrieveCore(db_path=':memory:')
+    subject = _full_subject()
+    subject['assessment_2026'] = 425000
+
+    on_date = core.calculate_similarity(subject, _full_comp(sale_date='2025-07-01'))
+    old_date = core.calculate_similarity(subject, _full_comp(sale_date='2024-07-01'))
+
+    assert on_date > old_date
+
+
 def test_similarity_perfect_match_scores_high():
     """A comp identical to the subject, sold on the valuation date, with a
     favorable price/sqft, should score in the A range (>= 85). Note: the

@@ -7,13 +7,49 @@ import subprocess
 import json
 import re
 import math
+import datetime as dt
 from app.counties.factory import CountyFactory
 from app.exceptions import CountyAPIError
 from app.equalization import get_rate as _er_rate, implied_market_value
 
 class TaxGrieveCore:
+    # Cap on how many filtered comps we verify against the county API and
+    # store. Verification is the slowest step (~0.3-1s/comp), and the
+    # valuation only uses the best 5 (best_n) — so verifying 35 to use 5 is
+    # wasted time and quota. We pre-sort by a cheap payload-only proximity
+    # heuristic and keep the top N, so the comps we drop are the least
+    # similar ones, not random ones. Tune here if thin markets need a wider net.
+    MAX_COMPS_TO_VERIFY = 15
+
     def __init__(self, db_path='grievance_data.db'):
         self.db_path = db_path
+
+    def get_roll_year(self, subject):
+        """Return the newest assessment roll year present on the subject."""
+        years = []
+        for key, value in (subject or {}).items():
+            m = re.fullmatch(r"assessment_(\d{4})", str(key))
+            if not m:
+                continue
+            try:
+                if value is not None and float(value) > 0:
+                    years.append(int(m.group(1)))
+            except (TypeError, ValueError):
+                continue
+        return max(years) if years else dt.date.today().year
+
+    def get_valuation_date(self, subject, roll_year=None):
+        """NYS standard valuation date for the assessment roll.
+
+        Most NY city/town rolls value property as of July 1 of the prior year.
+        For example, a 2026 roll is valued as of July 1, 2025.
+        """
+        roll_year = roll_year or self.get_roll_year(subject)
+        return dt.date(int(roll_year) - 1, 7, 1)
+
+    def get_current_assessment(self, subject):
+        roll_year = self.get_roll_year(subject)
+        return (subject or {}).get(f'assessment_{roll_year}', 0) or 0
 
     def _geocode(self, address_string):
         """Return (lat, lon, zip) using the US Census Geocoder, or (None, None, None)."""
@@ -358,6 +394,7 @@ class TaxGrieveCore:
         subj_swis = subject.get('sbl', '')[:6]
         rates = orpts_client.get_municipal_rates(subj_swis)
         rar = rates.get('rar', 100.0)
+        valuation_date = self.get_valuation_date(subject)
 
         # For Ulster, the per-comp NYS verification is the slowest path. Swap
         # in a fast-fail variant (3s timeout) so one slow query can't multiply
@@ -418,10 +455,48 @@ class TaxGrieveCore:
                        "message": f"Filtered out {dropped_class} non-matching property classes and {dropped_town} out-of-town comps."}
 
             raw_comps = filtered
-            yield {"status": "found", "count": len(raw_comps), "message": f"Found {len(raw_comps)} listings. Resuming/Filtering..."}
+
+            # Cheap pre-rank using only fields already present in the RapidAPI
+            # payload (no API calls). Lower score = closer match. We then verify
+            # only the best MAX_COMPS_TO_VERIFY, so the comps we skip are the
+            # least similar — not an arbitrary slice. Full similarity scoring
+            # (with county-verified fields) still happens later per comp.
+            subj_sqft = float(subject.get('sqft') or 0)
+            subj_beds = float(subject.get('bedrooms') or 0)
+            subj_baths = float(subject.get('bathrooms') or 0)
+
+            def _prerank(rc):
+                score = 0.0
+                rc_sqft = float(rc.get('livingArea') or rc.get('area') or 0)
+                if subj_sqft and rc_sqft:
+                    score += abs(rc_sqft - subj_sqft) / subj_sqft  # fractional GLA gap
+                else:
+                    score += 1.0  # penalize missing size data
+                rc_beds = float(rc.get('bedrooms') or 0)
+                rc_baths = float(rc.get('bathrooms') or 0)
+                score += abs(rc_beds - subj_beds) * 0.15
+                score += abs(rc_baths - subj_baths) * 0.10
+                # Prefer sales closest to the roll valuation date. That keeps
+                # the capped verification set aligned with the same temporal
+                # rule enforced later by _passes_hard_filters.
+                ts = rc.get('dateSold') or rc.get('lastSoldDate') or 0
+                try:
+                    sale_dt = dt.datetime.fromtimestamp(float(ts) / 1000).date()
+                    score += min(abs((sale_dt - valuation_date).days) / 183, 2.0) * 0.25
+                except (TypeError, ValueError):
+                    score += 0.25
+                return score
+
+            total_found = len(raw_comps)
+            if total_found > self.MAX_COMPS_TO_VERIFY:
+                raw_comps = sorted(raw_comps, key=_prerank)[: self.MAX_COMPS_TO_VERIFY]
+                yield {"status": "info",
+                       "message": f"Pre-ranked {total_found} candidates; verifying the {self.MAX_COMPS_TO_VERIFY} closest matches."}
+
+            yield {"status": "found", "count": len(raw_comps), "message": f"Found {total_found} listings. Verifying top {len(raw_comps)}..."}
 
             enriched_comps = []
-            # We process ALL raw comps returned by the search (RapidAPI usually limits to 40 anyway)
+            # raw_comps is now capped at MAX_COMPS_TO_VERIFY (pre-ranked above).
             total_raw = len(raw_comps)
             for i, rc in enumerate(raw_comps):
                 zpid = str(rc.get('zpid', rc.get('id', '')))
@@ -548,14 +623,18 @@ class TaxGrieveCore:
 
                 if comp_obj:
                     # Enforce Hard Filters
-                    passes, reason = self._passes_hard_filters(subject, comp_obj)
+                    passes, reason = self._passes_hard_filters(subject, comp_obj, valuation_date=valuation_date)
                     if not passes:
                         yield {"status": "resuming", "message": f"Rejected by Hard Filter: {reason} ({comp_obj['address']})"}
                         continue
 
                     # Calculate Grade & Score immediately
-                    comp_obj['similarity_score'] = self.calculate_similarity(subject, comp_obj, rar=rar)
-                    comp_obj['grade'] = self.calculate_similarity_grade(subject, comp_obj)
+                    comp_obj['similarity_score'] = self.calculate_similarity(
+                        subject, comp_obj, rar=rar, valuation_date=valuation_date
+                    )
+                    comp_obj['grade'] = self.calculate_similarity_grade(
+                        subject, comp_obj, valuation_date=valuation_date
+                    )
                     comp_obj['is_selected'] = 0 # Default to unselected for human review
 
                     # distance_miles column existence is guaranteed by
@@ -587,7 +666,7 @@ class TaxGrieveCore:
         finally:
             conn.close()
 
-    def _passes_hard_filters(self, subject, comp, valuation_date="2024-07-01"):
+    def _passes_hard_filters(self, subject, comp, valuation_date=None):
         """
         Enforce strict exclusion rules. Returns (True, "") or (False, "reason").
         """
@@ -600,15 +679,16 @@ class TaxGrieveCore:
                 if subj_swis != comp_swis:
                     return False, "Crosses Town/Village boundary"
 
-        # 2. Temporal Rule: ±6 months of Valuation Date (Valuation Date is July 1 of prior year)
-        # So for 2025 roll, val date is July 1, 2024. Window is Jan 1 2024 - Dec 31 2024.
+        # 2. Temporal Rule: ±6 months of the active roll valuation date.
+        if valuation_date is None:
+            valuation_date = self.get_valuation_date(subject)
+        elif isinstance(valuation_date, str):
+            valuation_date = dt.datetime.strptime(valuation_date, '%Y-%m-%d').date()
         sale_date = comp.get('sale_date', '')
         if sale_date:
             try:
-                import datetime as _dt
-                s_date = _dt.datetime.strptime(sale_date, '%Y-%m-%d').date()
-                v_date = _dt.datetime.strptime(valuation_date, '%Y-%m-%d').date()
-                delta = abs((s_date - v_date).days)
+                s_date = dt.datetime.strptime(sale_date, '%Y-%m-%d').date()
+                delta = abs((s_date - valuation_date).days)
                 if delta > 183: # ~6 months
                     return False, "Sale date outside 12-month window"
             except ValueError:
@@ -639,26 +719,26 @@ class TaxGrieveCore:
             return original_year
         return int((original_year + renovation_year) / 2)
 
-    def calculate_similarity(self, subject, comp, renovation_year=None, rar=100.0):
+    def calculate_similarity(self, subject, comp, renovation_year=None, rar=100.0, valuation_date=None):
         """
         Calculates Total Score = (Similarity Index * 0.70) + (Advantage Index * 0.30)
         Similarity Index (0-100): Date, GLA, Style/Era, Grade/Condition.
         Advantage Index (0-100): Based on price/sqft vs target EMV/sqft.
         """
-        import datetime as _dt
-        
         # --- SIMILARITY INDEX (70%) ---
         sim_points = 0.0
         max_sim_points = 100.0
+        valuation_date = valuation_date or self.get_valuation_date(subject)
+        if isinstance(valuation_date, str):
+            valuation_date = dt.datetime.strptime(valuation_date, '%Y-%m-%d').date()
 
         # 1. Date (Max 25 pts)
         date_pts = 0
         sale_date_str = comp.get('sale_date')
         if sale_date_str:
             try:
-                s_date = _dt.datetime.strptime(sale_date_str, '%Y-%m-%d').date()
-                v_date = _dt.date(2024, 7, 1) # Valuation date
-                days_diff = abs((s_date - v_date).days)
+                s_date = dt.datetime.strptime(sale_date_str, '%Y-%m-%d').date()
+                days_diff = abs((s_date - valuation_date).days)
                 if days_diff <= 183:
                     date_pts = max(0, 25 * (1 - (days_diff / 183)))
             except ValueError:
@@ -709,7 +789,7 @@ class TaxGrieveCore:
         # --- ADVANTAGE INDEX (30%) ---
         # Calculate Target EMV/sqft = (Assessed Value / RAR) / Target GLA
         target_emv_sqft = 0
-        av = subject.get('assessment_2025', 0)
+        av = self.get_current_assessment(subject)
         if av > 0 and subj_sqft > 0 and rar > 0:
             target_emv = av / (rar / 100.0)
             target_emv_sqft = target_emv / subj_sqft
@@ -735,23 +815,25 @@ class TaxGrieveCore:
         total_score = (similarity_index * 0.70) + (advantage_index * 0.30)
         return round(total_score, 1)
 
-    def calculate_similarity_grade(self, subject, comp, renovation_year=None, valuation_date="2025-07-01"):
+    def calculate_similarity_grade(self, subject, comp, renovation_year=None, valuation_date=None):
         """
         Assigns a letter grade (A, B, C, F) based on similarity score and sale date proximity.
         NYS BARs prioritize sales within 12 months of the Valuation Date.
         """
-        base_score = self.calculate_similarity(subject, comp, renovation_year)
-        
+        base_score = self.calculate_similarity(
+            subject, comp, renovation_year=renovation_year, valuation_date=valuation_date
+        )
+        valuation_date = valuation_date or self.get_valuation_date(subject)
+        if isinstance(valuation_date, str):
+            valuation_date = dt.datetime.strptime(valuation_date, "%Y-%m-%d").date()
+
         # Date Proximity Penalty
-        import datetime
         try:
-            val_dt = datetime.datetime.strptime(valuation_date, "%Y-%m-%d").date()
-            sale_dt = datetime.datetime.strptime(comp.get('sale_date', valuation_date), "%Y-%m-%d").date()
+            sale_dt = dt.datetime.strptime(comp.get('sale_date') or valuation_date.isoformat(), "%Y-%m-%d").date()
         except:
-            val_dt = datetime.date(2025, 7, 1)
-            sale_dt = val_dt
+            sale_dt = valuation_date
             
-        months_diff = abs((val_dt.year - sale_dt.year) * 12 + (val_dt.month - sale_dt.month))
+        months_diff = abs((valuation_date.year - sale_dt.year) * 12 + (valuation_date.month - sale_dt.month))
         
         # Deduct 2 points for every month beyond the ideal 12-month window
         date_penalty = 0
@@ -798,6 +880,7 @@ class TaxGrieveCore:
         subj_year = get_val(subject, 'year_built')
         if renovation_year:
             subj_year = self.calculate_effective_year_built(subj_year, renovation_year)
+        valuation_date = self.get_valuation_date(subject)
 
         raw_results = []
         for comp in comps:
@@ -848,7 +931,9 @@ class TaxGrieveCore:
                 # Safety floor at 10% of sale price.
                 reconciled = max(reconciled, adj_price * 0.1)
 
-                score = self.calculate_similarity(subject, comp, renovation_year=renovation_year)
+                score = self.calculate_similarity(
+                    subject, comp, renovation_year=renovation_year, valuation_date=valuation_date
+                )
 
                 raw_results.append({
                     'address': comp['address'], 'sale_price': comp['sale_price'],
@@ -1022,8 +1107,13 @@ class TaxGrieveCore:
         except Exception:
             rar = 100.0
             
-        comp_obj['similarity_score'] = self.calculate_similarity(subject, comp_obj, rar=rar)
-        comp_obj['grade'] = self.calculate_similarity_grade(subject, comp_obj)
+        valuation_date = self.get_valuation_date(subject)
+        comp_obj['similarity_score'] = self.calculate_similarity(
+            subject, comp_obj, rar=rar, valuation_date=valuation_date
+        )
+        comp_obj['grade'] = self.calculate_similarity_grade(
+            subject, comp_obj, valuation_date=valuation_date
+        )
         
         # Schema is guaranteed by init_schema() at startup + the legacy
         # SQLite migration block in discover_comps_live. No need to recreate
