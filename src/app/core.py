@@ -155,6 +155,9 @@ class TaxGrieveCore:
             except Exception:
                 pass
 
+        if profile.get('assessment_2026', 0) == 0 and profile.get('assessment_2025', 0):
+            profile['assessment_2026'] = profile['assessment_2025']
+
         # Geocode for distance math + ZIP-based scoping later.
         lat, lon, zipc = self._geocode(lookup_address)
         if lat is not None and lon is not None:

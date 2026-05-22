@@ -106,3 +106,40 @@ def test_subject_profile_by_identifier_skips_fuzzy_search():
     assert profile['sbl'] == '51080005603400090260000000'
     assert profile['zip'] == '12401'
     assert profile['latitude'] == 41.93
+
+def test_finish_subject_profile_uses_market_tax_value_as_current_assessment():
+    core = TaxGrieveCore(db_path=':memory:')
+    county = MagicMock()
+    county.get_town_from_identifier.return_value = 'Kingston'
+    profile = {
+        'address': '60 Orchard St',
+        'sbl': '51080005603400090260000000',
+        'sqft': 0,
+        'acreage': 0,
+        'bedrooms': 0,
+        'bathrooms': 0,
+        'year_built': 0,
+        'assessment_2025': 0,
+        'assessment_2026': 0,
+    }
+    market = [{
+        'livingArea': 2413,
+        'bedrooms': 3,
+        'bathrooms': 2,
+        'yearBuilt': 1973,
+        'taxAssessedValue': 448936,
+    }]
+
+    with patch.object(core, '_fetch_rapidapi_comps', return_value=market):
+        with patch.object(core, '_geocode', return_value=(41.93, -74.01, '12401')):
+            result = core._finish_subject_profile(
+                profile,
+                '51080005603400090260000000',
+                county,
+                address_string='60 Orchard St, Kingston, NY 12401',
+                zip_code='12401',
+            )
+
+    assert result['sqft'] == 2413
+    assert result['assessment_2025'] == 448936
+    assert result['assessment_2026'] == 448936
