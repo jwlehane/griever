@@ -126,7 +126,7 @@
         <h1>Phase 3: Curate Comparable Sales</h1>
         <details class="explainer">
             <summary>How Curation & Grading Works</summary>
-            <p>Review the discovered properties below. NYS requires sales to be <b>Arms-Length</b> and similar in size, age, and location. Select 3-5 of the best comps to finalize your valuation.</p>
+            <p>Review the discovered properties below. NYS requires sales to be <b>Arms-Length</b> and similar in size, age, and location. Select at least 3 defensible comps to finalize your valuation.</p>
             <p><b>Match (%):</b> The algorithm grades each property (A, B, C, F) based on how similar its specs (Sqft, Age, Acreage) are to the subject, penalizing sales that are further away or sold outside the ideal 12-month window.</p>
             <p><b>Adjusted Value:</b> This is the estimated value of your property <i>if</i> the comp's price was adjusted for the differences in square footage, age, and condition. You can tweak your property's <b>Condition</b> at the bottom to see how it dynamically affects these values.</p>
         </details>
@@ -237,7 +237,7 @@
 
             <div class="card finalize-card" style="background: #edf7fb; border-color: #b6d7e5; margin-top: 20px;">
                 <h3>Finalize Valuation</h3>
-                <p>Once you've selected exactly 3 comparable sales, click below to generate your final adjusted valuation and PDF package.</p>
+                <p>Once you've selected at least 3 comparable sales, click below to generate your final adjusted valuation and PDF package.</p>
                 <input type="hidden" name="address" value="{{ subject.address }}">
                 <input type="hidden" name="subject_id" value="{{ subject_id }}">
                 <input type="hidden" name="skip_discovery" value="true">

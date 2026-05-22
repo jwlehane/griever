@@ -235,7 +235,7 @@ async def generate_report(
             subject = dict(row)
             
             cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED'" + (" AND is_selected = 1" if init_finalize else ""), (active_subject_id,))
-            comps = [dict(r) for r in cursor.fetchall()]
+            comps = core.filter_defensible_comps([dict(r) for r in cursor.fetchall()])
             conn.close()
 
             if not comps:
@@ -250,6 +250,12 @@ async def generate_report(
                 condition_factor=condition_factor,
                 enforce_selection=init_finalize
             )
+
+            if init_finalize and valuation["used_count"] < 3:
+                return HTMLResponse(
+                    "Select at least 3 defensible comparable sales before finalizing.",
+                    status_code=400,
+                )
             
             if init_update_curation:
                 sorted_comps = sorted([c for c in valuation["comps"] if c.get('status') != 'REJECTED'], key=lambda x: x.get('similarity_score', 0), reverse=True)
@@ -337,11 +343,12 @@ async def generate_report(
             conn = get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED'", (active_subject_id,))
-            comps = [dict(row) for row in cursor.fetchall()]
+            all_comps = [dict(row) for row in cursor.fetchall()]
+            comps = core.filter_defensible_comps(all_comps)
             conn.close()
 
             if not comps:
-                yield f"data: {json.dumps({'status': 'no_comps', 'message': 'No matching sales found.', 'subject_id': active_subject_id})}\n\n"
+                yield f"data: {json.dumps({'status': 'no_comps', 'message': 'No defensible comparable sales found automatically. Add manual comps or broaden the search.', 'subject_id': active_subject_id})}\n\n"
                 return
 
             condition_factors = {"below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20}
@@ -423,7 +430,7 @@ def _build_report_context(subject_id: int, renovation_year: int = None, conditio
         "SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED' AND is_selected = 1",
         (subject_id,),
     )
-    comps = [dict(r) for r in cursor.fetchall()]
+    comps = core.filter_defensible_comps([dict(r) for r in cursor.fetchall()])
     conn.close()
 
     condition_factors = {"below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20}

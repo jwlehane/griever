@@ -68,3 +68,18 @@ def test_valuation_enforcement():
     res_all = core.calculate_valuation(subject, comps, enforce_selection=False)
     assert res_all["used_count"] == 2
     assert res_all["market_value"] == 450000
+
+
+def test_defensible_comp_gate_rejects_weak_automatic_comps():
+    core = TaxGrieveCore(db_path=':memory:')
+
+    comps = [
+        {'address': 'Verified C', 'status': 'VERIFIED', 'grade': 'C', 'similarity_score': 50.1},
+        {'address': 'Verified F', 'status': 'VERIFIED', 'grade': 'F', 'similarity_score': 49.9},
+        {'address': 'Unverified A', 'status': 'UNVERIFIED', 'grade': 'A', 'similarity_score': 90},
+        {'address': 'Unscored Auto', 'status': 'VERIFIED'},
+        {'address': 'Manual F', 'status': 'MANUAL', 'grade': 'F', 'similarity_score': 20},
+    ]
+
+    kept = core.filter_defensible_comps(comps)
+    assert [c['address'] for c in kept] == ['Verified C', 'Manual F']

@@ -20,9 +20,61 @@ class TaxGrieveCore:
     # heuristic and keep the top N, so the comps we drop are the least
     # similar ones, not random ones. Tune here if thin markets need a wider net.
     MAX_COMPS_TO_VERIFY = 15
+    MIN_DEFENSIBLE_SCORE = 50.0
 
     def __init__(self, db_path='grievance_data.db'):
         self.db_path = db_path
+
+    def is_defensible_comp(self, comp):
+        """Return True when a comp is strong enough for automatic curation.
+
+        Automatic comps need county verification and a C-or-better similarity
+        grade. Manual comps are allowed through because the user supplied them
+        intentionally and the UI/server still enforce at least three selected
+        comps before a final report.
+        """
+        status = (comp or {}).get('status')
+        status = str(status or '').upper()
+        if status == 'REJECTED':
+            return False
+        if status == 'MANUAL':
+            return True
+        if status == 'UNVERIFIED':
+            return False
+
+        grade = str((comp or {}).get('grade') or '').upper()
+        if grade == 'F':
+            return False
+
+        raw_score = (comp or {}).get('similarity_score')
+        if not grade and raw_score is None:
+            return False
+        if raw_score is not None:
+            try:
+                if float(raw_score) < self.MIN_DEFENSIBLE_SCORE:
+                    return False
+            except (TypeError, ValueError):
+                pass
+
+        return True
+
+    def filter_defensible_comps(self, comps):
+        return [comp for comp in (comps or []) if self.is_defensible_comp(comp)]
+
+    def quality_rejection_reason(self, comp):
+        status = str((comp or {}).get('status') or '').upper()
+        if status == 'UNVERIFIED':
+            return "County verification failed"
+        grade = str((comp or {}).get('grade') or '').upper()
+        score = (comp or {}).get('similarity_score')
+        if grade == 'F':
+            return f"Similarity grade F ({score}%)"
+        try:
+            if score is not None and float(score) < self.MIN_DEFENSIBLE_SCORE:
+                return f"Similarity score below {self.MIN_DEFENSIBLE_SCORE:.0f}% ({score}%)"
+        except (TypeError, ValueError):
+            pass
+        return "Insufficient comp quality"
 
     def get_roll_year(self, subject):
         """Return the newest assessment roll year present on the subject."""
@@ -515,6 +567,10 @@ class TaxGrieveCore:
                         row = cursor.fetchone()
                         row_cols = [description[0] for description in cursor.description]
                         comp_obj = dict(zip(row_cols, row))
+                        if not self.is_defensible_comp(comp_obj):
+                            reason = self.quality_rejection_reason(comp_obj)
+                            yield {"status": "resuming", "message": f"Skipped low-quality existing comp: {reason} ({comp_obj['address']})"}
+                            continue
                         enriched_comps.append(comp_obj)
                         yield {"status": "verified", "comp": comp_obj, "message": f"Resumed: {comp_obj['address']}"}
                         continue
@@ -636,6 +692,11 @@ class TaxGrieveCore:
                         subject, comp_obj, valuation_date=valuation_date
                     )
                     comp_obj['is_selected'] = 0 # Default to unselected for human review
+
+                    if not self.is_defensible_comp(comp_obj):
+                        reason = self.quality_rejection_reason(comp_obj)
+                        yield {"status": "resuming", "message": f"Rejected by Quality Gate: {reason} ({comp_obj['address']})"}
+                        continue
 
                     # distance_miles column existence is guaranteed by
                     # init_schema()/the earlier legacy migration block, so
