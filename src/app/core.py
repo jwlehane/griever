@@ -758,7 +758,7 @@ class TaxGrieveCore:
                         subject, comp_obj, rar=rar, valuation_date=valuation_date
                     )
                     comp_obj['grade'] = self.calculate_similarity_grade(
-                        subject, comp_obj, valuation_date=valuation_date
+                        subject, comp_obj, rar=rar, valuation_date=valuation_date
                     )
                     comp_obj['is_selected'] = 0 # Default to unselected for human review
 
@@ -947,13 +947,13 @@ class TaxGrieveCore:
         total_score = (similarity_index * 0.70) + (advantage_index * 0.30)
         return round(total_score, 1)
 
-    def calculate_similarity_grade(self, subject, comp, renovation_year=None, valuation_date=None):
+    def calculate_similarity_grade(self, subject, comp, renovation_year=None, rar=100.0, valuation_date=None):
         """
         Assigns a letter grade (A, B, C, F) based on similarity score and sale date proximity.
         NYS BARs prioritize sales within 12 months of the Valuation Date.
         """
         base_score = self.calculate_similarity(
-            subject, comp, renovation_year=renovation_year, valuation_date=valuation_date
+            subject, comp, renovation_year=renovation_year, rar=rar, valuation_date=valuation_date
         )
         valuation_date = valuation_date or self.get_valuation_date(subject)
         if isinstance(valuation_date, str):
@@ -1244,7 +1244,7 @@ class TaxGrieveCore:
             subject, comp_obj, rar=rar, valuation_date=valuation_date
         )
         comp_obj['grade'] = self.calculate_similarity_grade(
-            subject, comp_obj, valuation_date=valuation_date
+            subject, comp_obj, rar=rar, valuation_date=valuation_date
         )
         
         # Schema is guaranteed by init_schema() at startup + the legacy

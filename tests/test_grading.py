@@ -52,6 +52,33 @@ def test_grading_logic_basic():
     assert grade_f == "F", f"mismatched comp graded {grade_f}"
 
 
+def test_grading_uses_same_rar_as_similarity_score():
+    core = TaxGrieveCore(db_path=':memory:')
+    subject = {
+        'sqft': 2413,
+        'year_built': 1973,
+        'acreage': 0.1,
+        'bedrooms': 3,
+        'bathrooms': 2,
+        'assessment_2026': 448936,
+    }
+    comp = {
+        'sqft': 2257,
+        'year_built': 1970,
+        'acreage': 0.1,
+        'bedrooms': 3,
+        'bathrooms': 2,
+        'sale_price': 571000,
+        'sale_date': '2026-05-13',
+    }
+
+    score = core.calculate_similarity(subject, comp, rar=44.03, valuation_date='2025-07-01')
+    grade = core.calculate_similarity_grade(subject, comp, rar=44.03, valuation_date='2025-07-01')
+
+    assert score >= 50
+    assert grade == "C"
+
+
 def test_valuation_enforcement():
     core = TaxGrieveCore(db_path=':memory:')
 
