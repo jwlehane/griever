@@ -2,72 +2,132 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
     <title>Grievance Report - {{ subject.address }}</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; color: #2c3e50; max-width: 880px; margin: 32px auto; padding: 20px; }
-        h1, h2 { color: #1a252f; }
+        :root {
+            --bg: #edf2f0;
+            --surface: #ffffff;
+            --surface-soft: #f7f9f8;
+            --border: #d9e2df;
+            --text: #1f2d2a;
+            --muted: #64736f;
+            --primary: #1f8a5b;
+            --accent: #245c7a;
+            --warning: #bf6516;
+            --danger: #b33a32;
+            --shadow: 0 18px 45px rgba(31, 45, 42, 0.10);
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            line-height: 1.55;
+            color: var(--text);
+            max-width: 960px;
+            margin: 24px auto;
+            padding: 24px;
+            background: var(--bg);
+        }
+        h1, h2 { color: var(--text); letter-spacing: 0; }
+        h1 { font-size: clamp(30px, 6vw, 42px); line-height: 1.08; margin: 0; }
         h2 { border-bottom: 1px solid #e0e6ed; padding-bottom: 6px; margin-top: 32px; }
-        .header { border-bottom: 2px solid #2c3e50; padding-bottom: 10px; margin-bottom: 24px; }
-        .header h3 { color: #7f8c8d; font-weight: 400; margin: 4px 0 0; }
+        .page-shell { background: white; border: 1px solid rgba(217, 226, 223, 0.9); border-radius: 8px; box-shadow: var(--shadow); padding: clamp(22px, 4vw, 34px); }
+        .header { border-bottom: 2px solid var(--text); padding-bottom: 14px; margin-bottom: 24px; }
+        .header h3 { color: var(--muted); font-weight: 400; margin: 6px 0 0; line-height: 1.35; }
         .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 14px; margin-bottom: 24px; }
-        .stat-box { background: #f8f9fa; padding: 14px 16px; border-radius: 4px; border-left: 4px solid #27ae60; }
-        .stat-box.warn { border-left-color: #e67e22; }
-        .stat-box.bad  { border-left-color: #c0392b; }
-        .stat-box.neutral { border-left-color: #7f8c8d; }
-        .stat-box h4 { margin: 0; color: #7f8c8d; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-        .stat-box p { margin: 6px 0 0; font-size: 22px; font-weight: 700; line-height: 1.1; }
-        .stat-box small { color: #95a5a6; font-size: 11px; display: block; margin-top: 4px; }
-        table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+        .stat-box { background: var(--surface-soft); padding: 14px 16px; border-radius: 6px; border-left: 4px solid var(--primary); min-width: 0; }
+        .stat-box.warn { border-left-color: var(--warning); }
+        .stat-box.bad  { border-left-color: var(--danger); }
+        .stat-box.neutral { border-left-color: var(--muted); }
+        .stat-box h4 { margin: 0; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-box p { margin: 6px 0 0; font-size: clamp(19px, 4vw, 24px); font-weight: 700; line-height: 1.1; overflow-wrap: anywhere; }
+        .stat-box small { color: var(--muted); font-size: 11px; display: block; margin-top: 4px; }
+        .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--border); border-radius: 8px; background: white; margin: 16px 0; }
+        table { width: 100%; min-width: 680px; border-collapse: collapse; font-size: 14px; }
         th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #ecf0f1; vertical-align: top; }
-        th { background: #f2f4f7; color: #7f8c8d; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        th { background: var(--surface-soft); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
         tr.row-used { background: #f3faf5; }
-        tr.row-outlier { color: #c0392b; }
+        tr.row-outlier { color: var(--danger); }
         tr.row-outlier td { background: #fff5f5; }
         .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; letter-spacing: 0.5px; margin-right: 4px; }
         .badge-used    { background: #d5f5e0; color: #145a32; }
         .badge-outlier { background: #fadbd8; color: #922b21; }
-        .badge-unused  { background: #ecf0f1; color: #7f8c8d; }
-        .narrative { background: #fffde7; padding: 18px; border-radius: 4px; font-style: italic; border: 1px solid #ffe57f; }
-        .alert-box { padding: 14px 18px; border-radius: 4px; margin-bottom: 20px; }
+        .badge-unused  { background: #ecf0f1; color: var(--muted); }
+        .narrative { background: #fffde7; padding: 18px; border-radius: 6px; font-style: italic; border: 1px solid #ffe57f; }
+        .alert-box { padding: 14px 18px; border-radius: 6px; margin-bottom: 20px; }
         .alert-good { background: #d5f5e0; border: 1px solid #82d59a; color: #145a32; }
         .alert-mid  { background: #fff3e0; border: 1px solid #ffb74d; color: #7c4a00; }
         .alert-bad  { background: #fadbd8; border: 1px solid #e6b0aa; color: #6e2018; }
-        .btn { display: inline-block; background: #2c3e50; color: white; padding: 9px 16px; text-decoration: none; border-radius: 4px; border: none; font-size: 14px; cursor: pointer; }
-        .btn-print { float: right; }
-        .btn-primary { background: #27ae60; }
+        .btn { display: inline-flex; justify-content: center; align-items: center; min-height: 42px; background: var(--text); color: white; padding: 9px 16px; text-decoration: none; border-radius: 6px; border: none; font-size: 14px; font-weight: 700; cursor: pointer; }
+        .btn-print { float: right; margin-left: 12px; }
+        .btn-primary { background: var(--primary); }
         .btn-row { display: flex; gap: 10px; margin: 16px 0; flex-wrap: wrap; }
-        .disclaimer { font-size: 11px; color: #7f8c8d; border-top: 1px solid #ecf0f1; margin-top: 40px; padding-top: 16px; line-height: 1.5; }
+        .disclaimer { font-size: 11px; color: var(--muted); border-top: 1px solid #ecf0f1; margin-top: 40px; padding-top: 16px; line-height: 1.5; }
         .spec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; font-size: 13px; }
-        .er-line { font-size: 13px; color: #7f8c8d; }
-        details summary { cursor: pointer; color: #3498db; font-size: 13px; padding: 6px 0; }
-        details[open] summary { color: #2c3e50; font-weight: 600; }
-        .filing-card { background: #eaf3fb; border: 1px solid #aed6f1; padding: 18px; border-radius: 4px; margin: 20px 0; }
-        .filing-card h3 { margin-top: 0; color: #1f618d; }
-        .filing-card .deadline { font-size: 18px; font-weight: bold; color: #c0392b; }
+        .er-line { font-size: 13px; color: var(--muted); }
+        details summary { cursor: pointer; color: var(--accent); font-size: 13px; padding: 6px 0; }
+        details[open] summary { color: var(--text); font-weight: 600; }
+        .filing-card { background: #edf7fb; border: 1px solid #b6d7e5; padding: 18px; border-radius: 6px; margin: 20px 0; }
+        .filing-card h3 { margin-top: 0; color: var(--accent); }
+        .filing-card .deadline { font-size: 18px; font-weight: bold; color: var(--danger); }
         
-        .explainer { background: #e3f2fd; border-left: 4px solid #1565c0; padding: 10px 15px; margin-bottom: 20px; border-radius: 4px; font-size: 14px; }
-        .explainer summary { font-weight: bold; cursor: pointer; color: #1565c0; outline: none; list-style: none; }
+        .explainer { background: #edf7fb; border-left: 4px solid var(--accent); padding: 12px 15px; margin-bottom: 20px; border-radius: 6px; font-size: 14px; }
+        .explainer summary { font-weight: bold; cursor: pointer; color: var(--accent); outline: none; list-style: none; }
         .explainer summary::-webkit-details-marker { display: none; }
-        .explainer summary::before { content: "ℹ️ "; }
+        .explainer summary::before { content: "Info: "; }
         .explainer p { margin: 8px 0 0 0; color: #333; line-height: 1.4; }
         
         /* Modal Styles */
         .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
-        .modal-content { background-color: white; margin: 10% auto; padding: 25px; border-radius: 8px; width: 450px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
-        .modal-content h3 { margin-top: 0; color: #2c3e50; }
-        .modal-content p { font-size: 14px; color: #7f8c8d; margin-bottom: 20px; }
+        .modal-content { background-color: white; margin: 8vh auto; padding: 25px; border-radius: 8px; width: min(460px, calc(100% - 32px)); box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+        .modal-content h3 { margin-top: 0; color: var(--text); }
+        .modal-content p { font-size: 14px; color: var(--muted); margin-bottom: 20px; }
         .form-group { margin-bottom: 15px; text-align: left; }
-        .form-group label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 5px; color: #2c3e50; }
-        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        .form-group label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 5px; color: var(--text); }
+        .form-group input, .inline-form input, .inline-form select, .manual-card input { width: 100%; min-height: 42px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; }
         .modal-actions { margin-top: 25px; display: flex; justify-content: flex-end; gap: 10px; }
-        .modal-actions button { padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 14px; }
+        .modal-actions button { padding: 10px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; }
         .btn-cancel-modal { background: #ecf0f1; border: 1px solid #ddd; color: #333; }
-        .btn-submit-modal { background: #27ae60; border: none; color: white; }
+        .btn-submit-modal { background: var(--primary); border: none; color: white; }
         .btn-submit-modal:disabled { background: #95a5a6; cursor: not-allowed; }
+        .calc-box { padding: 10px 14px; background: #fafbfc; border-left: 3px solid #bdc3c7; font-size: 13px; }
+        .refine-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .refine-card, .manual-card { padding: 16px; border-radius: 6px; border: 1px solid var(--border); }
+        .refine-card.green { background: #e8f5e9; }
+        .refine-card.yellow { background: #fff8e1; }
+        .refine-card h3 { margin-top: 0; font-size: 16px; }
+        .refine-card p, .manual-card p { font-size: 13px; }
+        .inline-form { display: flex; gap: 8px; align-items: center; }
+        .manual-card { background: var(--surface-soft); }
+        .manual-card form { display: flex; gap: 8px; }
+        .manual-card input[name="address"] { flex: 2; }
+        .manual-card input[name="price"] { flex: 1; }
+
+        @media (max-width: 720px) {
+            body { margin: 0; padding: 0; background: white; }
+            .page-shell { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; padding: 24px 16px; }
+            .btn-print { float: none; width: 100%; margin: 0 0 18px; }
+            .stat-grid, .spec-grid, .refine-grid { grid-template-columns: 1fr; }
+            .btn-row { flex-direction: column; }
+            .btn-row .btn, .btn-row button { width: 100%; }
+            .inline-form, .manual-card form, .modal-actions { flex-direction: column; align-items: stretch; }
+            .modal-actions button { width: 100%; }
+            h2 { font-size: 21px; }
+        }
+
+        @media print {
+            body { background: white; margin: 0; padding: 0; }
+            .page-shell { border: 0; box-shadow: none; padding: 0; }
+            .btn-print, .btn-row, .modal { display: none !important; }
+            .table-wrap { overflow: visible; border: 0; }
+            table { min-width: 0; }
+        }
     </style>
 </head>
 <body>
-    <a href="#" class="btn btn-print" onclick="window.print()">🖨 Print</a>
+    <main class="page-shell">
+    <a href="#" class="btn btn-print" onclick="window.print()">Print</a>
     <div class="header">
         <h1>Phase 4: Property Tax Grievance Analysis</h1>
         <h3>{{ subject.address }}{% if subject.town %} — {{ subject.town }}, NY{% endif %}</h3>
@@ -81,12 +141,12 @@
 
     {% if reduction > 0 %}
     <div class="alert-box alert-good">
-        <strong>✅ Grievance Appears Warranted.</strong>
+        <strong>Grievance Appears Warranted.</strong>
         Filing RP-524 could reduce your assessment by approximately <strong>${{ "{:,.0f}".format(reduction) }}</strong>.
     </div>
     {% else %}
     <div class="alert-box alert-mid">
-        <strong>ℹ️ No Grievance Recommended.</strong>
+        <strong>No Grievance Recommended.</strong>
         Your equalization-adjusted market value is in line with — or below — comparable sales. Filing now is unlikely to succeed.
     </div>
     {% endif %}
@@ -121,7 +181,7 @@
 
     <details>
         <summary>How is this calculated?</summary>
-        <div style="padding: 10px 14px; background: #fafbfc; border-left: 3px solid #bdc3c7; font-size: 13px;">
+        <div class="calc-box">
             <p><strong>Method:</strong> Sales-comparison approach using {{ used_count }} best-matching comparable sales (out of {{ considered_count }} considered), with median + 1.5×IQR outlier filter.</p>
             <p><strong>Equalization rate handling:</strong> Your assessment of ${{ "{:,.0f}".format(current_av or 0) }} is divided by your municipality's {{ equalization_rate|round(2) if equalization_rate else 100 }}% rate to derive an <em>implied full market value</em> of ${{ "{:,.0f}".format(implied_market_value) if implied_market_value else "{:,.0f}".format(current_av or 0) }}. We compare that against the comp-derived market value.</p>
             <p><strong>Local adjustment factors used:</strong></p>
@@ -147,6 +207,7 @@
     </div>
 
     <h2>Comparable Sales ({{ used_count }} curated and selected)</h2>
+    <div class="table-wrap">
     <table>
         <thead>
             <tr>
@@ -194,6 +255,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 
     {% if reduction > 0 %}
     <h2>Grievance Narrative (Suggested for Form RP-524)</h2>
@@ -211,34 +273,34 @@
     </div>
 
     <div class="btn-row">
-        <button class="btn btn-primary" onclick="openDownloadModal('rp524')">📄 Download RP-524 PDF</button>
-        <a class="btn" href="/grievance/methodology.pdf?subject_id={{ subject_id }}{% if renovation_year %}&renovation_year={{ renovation_year }}{% endif %}&condition={{ condition }}">📑 Methodology PDF</a>
-        <button class="btn" onclick="openDownloadModal('package')">📦 Full Evidence Package</button>
+        <button class="btn btn-primary" onclick="openDownloadModal('rp524')">Download RP-524 PDF</button>
+        <a class="btn" href="/grievance/methodology.pdf?subject_id={{ subject_id }}{% if renovation_year %}&renovation_year={{ renovation_year }}{% endif %}&condition={{ condition }}">Methodology PDF</a>
+        <button class="btn" onclick="openDownloadModal('package')">Full Evidence Package</button>
     </div>
 
     <h2>Refine the Estimate</h2>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-        <div style="background: #e8f5e9; padding: 16px; border-radius: 4px;">
-            <h3 style="margin-top:0; font-size: 16px;">🛠 Recent Renovation?</h3>
+    <div class="refine-grid">
+        <div class="refine-card green">
+            <h3>Recent Renovation?</h3>
             <p style="font-size: 13px;">If this property has had a major renovation, the year-built factor will be re-computed against an effective age.</p>
-            <form action="/report" method="post" style="display: flex; gap: 8px; align-items: center;">
+            <form action="/report" method="post" class="inline-form">
                 <input type="hidden" name="address" value="{{ subject.address }}">
                 <input type="hidden" name="subject_id" value="{{ subject_id }}">
                 <input type="hidden" name="skip_discovery" value="true">
                 <input type="hidden" name="condition" value="{{ condition }}">
-                <input type="number" name="renovation_year" value="{{ renovation_year or '' }}" placeholder="YYYY" style="width: 90px; padding: 8px;" min="1900" max="2026">
+                <input type="number" name="renovation_year" value="{{ renovation_year or '' }}" placeholder="YYYY" min="1900" max="2026">
                 <button type="submit" class="btn btn-primary">Update</button>
             </form>
         </div>
-        <div style="background: #fff8e1; padding: 16px; border-radius: 4px;">
-            <h3 style="margin-top:0; font-size: 16px;">🏚 Condition vs. typical block</h3>
+        <div class="refine-card yellow">
+            <h3>Condition vs. typical block</h3>
             <p style="font-size: 13px;">Below-average condition (deferred maintenance) lowers the estimate by 15%; renovated raises it by 20%.</p>
-            <form action="/report" method="post" style="display: flex; gap: 8px; align-items: center;">
+            <form action="/report" method="post" class="inline-form">
                 <input type="hidden" name="address" value="{{ subject.address }}">
                 <input type="hidden" name="subject_id" value="{{ subject_id }}">
                 <input type="hidden" name="skip_discovery" value="true">
                 {% if renovation_year %}<input type="hidden" name="renovation_year" value="{{ renovation_year }}">{% endif %}
-                <select name="condition" style="flex: 1; padding: 8px;">
+                <select name="condition">
                     <option value="below"    {% if condition=='below'    %}selected{% endif %}>Below average</option>
                     <option value="average"  {% if condition=='average' or not condition  %}selected{% endif %}>Average</option>
                     <option value="above"    {% if condition=='above'    %}selected{% endif %}>Above average</option>
@@ -250,12 +312,12 @@
     </div>
 
     <h2>Add a Comp Manually</h2>
-    <div style="background: #f8f9fa; padding: 16px; border-radius: 4px; border: 1px solid #e0e6ed;">
+    <div class="manual-card">
         <p style="font-size: 13px;">Found a better comp on Zillow or county records? Add it manually — we'll verify and recalculate.</p>
-        <form action="/add_comp" method="post" style="display: flex; gap: 8px;">
+        <form action="/add_comp" method="post">
             <input type="hidden" name="property_id" value="{{ subject_id }}">
-            <input type="text" name="address" placeholder="Comp Address" style="flex: 2; padding: 10px;" required>
-            <input type="number" name="price" placeholder="Sale Price ($)" style="flex: 1; padding: 10px;" required>
+            <input type="text" name="address" placeholder="Comp Address" required>
+            <input type="number" name="price" placeholder="Sale Price ($)" required>
             <button type="submit" class="btn">Add & Recalculate</button>
         </form>
     </div>
@@ -263,6 +325,7 @@
     <div class="disclaimer">
         <strong>Disclaimer.</strong> This report is an automated estimate based on public assessment-roll data and recent real-estate listings. It is <strong>not</strong> a certified appraisal and does <strong>not</strong> constitute legal or tax advice. Filing decisions and the accuracy of any RP-524 you submit are your sole responsibility. For high-value or complex properties, consult a licensed real estate appraiser or tax-grievance attorney. Data sources: NYS Office of Real Property Tax Services (assessment, RAR, parcel records), RapidAPI Real-Time Real-Estate Data (recent sales), US Census Geocoder (address validation).
     </div>
+    </main>
 
     <!-- Download Modal -->
     <div id="downloadModal" class="modal">

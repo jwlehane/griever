@@ -3,40 +3,122 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
     <title>Curate Comps - TaxGrieve NY</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f7f6; color: #333; margin: 0; padding: 20px; }
-        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        h1, h2 { color: #2c3e50; }
-        .card { background: #f8f9fa; border: 1px solid #ddd; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+        :root {
+            --bg: #edf2f0;
+            --surface: #ffffff;
+            --surface-soft: #f7f9f8;
+            --border: #d9e2df;
+            --text: #1f2d2a;
+            --muted: #64736f;
+            --primary: #1f8a5b;
+            --primary-dark: #176e48;
+            --accent: #245c7a;
+            --danger: #b33a32;
+            --shadow: 0 18px 45px rgba(31, 45, 42, 0.10);
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 24px;
+            line-height: 1.5;
+        }
+        .container {
+            width: min(1120px, 100%);
+            margin: 0 auto;
+            background: white;
+            padding: clamp(22px, 4vw, 34px);
+            border: 1px solid rgba(217, 226, 223, 0.9);
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+        }
+        h1, h2 { color: var(--text); letter-spacing: 0; }
+        h1 { margin-top: 0; font-size: clamp(28px, 5vw, 40px); line-height: 1.1; }
+        h2 { margin: 0; font-size: clamp(22px, 4vw, 28px); }
+        .card { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+        .subject-card h3, .finalize-card h3, .manual-card h3, .settings-panel h3 { margin-top: 0; color: var(--text); }
+        .subject-card p, .manual-card p, .finalize-card p { color: var(--muted); }
         .grade { font-size: 18px; font-weight: bold; display: inline-block; padding: 5px 12px; border-radius: 4px; margin-right: 10px; }
         .grade-A { background: #d4edda; color: #2e7d32; }
         .grade-B { background: #e3f2fd; color: #1565c0; }
         .grade-C { background: #fff3e0; color: #ef6c00; }
         .grade-F { background: #ffebee; color: #c62828; }
         
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        .table-wrap {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: white;
+        }
+        table { width: 100%; min-width: 900px; border-collapse: collapse; font-size: 14px; }
         th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
-        th { background: #ecf0f1; color: #7f8c8d; }
+        th { background: var(--surface-soft); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
         
-        button { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; }
+        button, input, select { font: inherit; }
+        input, select {
+            min-height: 42px;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: white;
+            color: var(--text);
+        }
+        button { min-height: 42px; padding: 9px 15px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
         .btn-select { background: #e0e0e0; color: #333; }
         .btn-select.selected { background: #27ae60; color: white; }
-        .btn-reject { background: #e74c3c; color: white; }
-        .btn-finalize { width: 100%; padding: 15px; background: #2980b9; color: white; font-size: 18px; margin-top: 30px; }
-        .btn-finalize:hover { background: #2471a3; }
+        .btn-reject { background: var(--danger); color: white; }
+        .btn-finalize { width: 100%; min-height: 50px; padding: 14px; background: var(--accent); color: white; font-size: 17px; margin-top: 10px; }
+        .btn-finalize:hover { background: #1c4962; }
+        .btn-auto { background: var(--primary); color: white; padding: 10px 20px; font-size: 14px; }
+        .action-cell { display: flex; gap: 8px; flex-wrap: wrap; }
+        .settings-panel {
+            background: var(--surface-soft);
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+        .settings-panel p { font-size: 13px; margin-top: 0; color: var(--muted); }
+        .field-row { display: flex; gap: 18px; align-items: end; flex-wrap: wrap; }
+        .field-row label { display: grid; gap: 6px; min-width: 190px; font-size: 14px; }
+        .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 12px; }
+        .manual-fields { display: flex; gap: 10px; align-items: center; }
+        .manual-fields input:first-child { flex: 1 1 280px; }
+        .manual-fields input:nth-child(2) { flex: 0 1 200px; }
+        .math-panel { display: none; background: #fff; padding: 8px; border: 1px solid var(--border); margin-top: 5px; border-radius: 4px; min-width: 180px; }
+        .math-line { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #f1f1f1; padding: 3px 0; }
         
         /* Modal */
         .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
-        .modal-content { background-color: white; margin: 15% auto; padding: 20px; border-radius: 8px; width: 400px; text-align: center; }
-        .modal-content select { width: 100%; padding: 10px; margin: 15px 0; border: 1px solid #ddd; }
+        .modal-content { background-color: white; margin: 15vh auto; padding: 22px; border-radius: 8px; width: min(420px, calc(100% - 32px)); text-align: center; }
+        .modal-content select { width: 100%; margin: 15px 0; }
         .modal-content button { margin: 5px; }
 
-        .explainer { background: #e3f2fd; border-left: 4px solid #1565c0; padding: 10px 15px; margin-bottom: 20px; border-radius: 4px; font-size: 14px; }
-        .explainer summary { font-weight: bold; cursor: pointer; color: #1565c0; outline: none; list-style: none; }
+        .explainer { background: #edf7fb; border-left: 4px solid var(--accent); padding: 12px 15px; margin-bottom: 20px; border-radius: 6px; font-size: 14px; }
+        .explainer summary { font-weight: bold; cursor: pointer; color: var(--accent); outline: none; list-style: none; }
         .explainer summary::-webkit-details-marker { display: none; }
-        .explainer summary::before { content: "ℹ️ "; }
+        .explainer summary::before { content: "Info: "; }
         .explainer p { margin: 8px 0 0 0; color: #333; line-height: 1.4; }
+
+        @media (max-width: 720px) {
+            body { padding: 0; background: white; }
+            .container { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; padding: 24px 16px; }
+            .section-heading { align-items: stretch; flex-direction: column; }
+            .btn-auto { width: 100%; }
+            .field-row, .manual-fields { flex-direction: column; align-items: stretch; }
+            .field-row label, .manual-fields input, .manual-fields button { width: 100%; min-width: 0; }
+            .manual-fields input,
+            .manual-fields input:first-child,
+            .manual-fields input:nth-child(2) { flex: none; }
+            .modal-content { margin: 8vh auto; }
+        }
     </style>
 </head>
 <body>
@@ -49,34 +131,37 @@
             <p><b>Adjusted Value:</b> This is the estimated value of your property <i>if</i> the comp's price was adjusted for the differences in square footage, age, and condition. You can tweak your property's <b>Condition</b> at the bottom to see how it dynamically affects these values.</p>
         </details>
         
-        <div class="card">
+        <div class="card subject-card">
             <h3>Subject Property: {{ subject.address }}</h3>
             <p>{{ subject.bedrooms }} Beds, {{ subject.bathrooms }} Baths, {{ subject.sqft }} Sqft, Built {{ subject.year_built }}</p>
         </div>
 
         <form action="/report" method="POST" id="finalize-form">
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px;">
-                <h3 style="margin-top: 0;">Adjust Base Pricing</h3>
-                <p style="font-size: 13px; margin-top: 0; color: #555;">Tweak your property's condition or renovation year to dynamically recalculate the adjusted values below.</p>
-                <label style="margin-right: 20px;">
+            <div class="settings-panel">
+                <h3>Adjust Base Pricing</h3>
+                <p>Tweak your property's condition or renovation year to dynamically recalculate the adjusted values below.</p>
+                <div class="field-row">
+                <label>
                     <b>Renovation Year:</b>
-                    <input type="number" id="curation-renov" name="renovation_year" value="{{ renovation_year or '' }}" placeholder="YYYY" style="width: 80px; padding: 5px; margin-left: 5px;" min="1900" max="2026" onchange="updatePricing('{{ subject.address|escape }}', {{ subject_id }})">
+                    <input type="number" id="curation-renov" name="renovation_year" value="{{ renovation_year or '' }}" placeholder="YYYY" min="1900" max="2026" onchange="updatePricing('{{ subject.address|escape }}', {{ subject_id }})">
                 </label>
                 <label>
                     <b>Subject Condition:</b>
-                    <select id="curation-cond" name="condition" style="padding: 5px; margin-left: 5px;" onchange="updatePricing('{{ subject.address|escape }}', {{ subject_id }})">
+                    <select id="curation-cond" name="condition" onchange="updatePricing('{{ subject.address|escape }}', {{ subject_id }})">
                         <option value="average" {% if condition == 'average' %}selected{% endif %}>Average</option>
                         <option value="below" {% if condition == 'below' %}selected{% endif %}>Below Average (-15%)</option>
                         <option value="above" {% if condition == 'above' %}selected{% endif %}>Above Average (+10%)</option>
                         <option value="renovated" {% if condition == 'renovated' %}selected{% endif %}>Newly Renovated (+20%)</option>
                     </select>
                 </label>
+                </div>
             </div>
 
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="section-heading">
                 <h2>Available Comps</h2>
-                <button type="button" onclick="autoSelectTop3()" style="background: #27ae60; color: white; padding: 10px 20px; font-size: 14px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Auto-Select Top 3</button>
+                <button type="button" class="btn-auto" onclick="autoSelectTop3()">Auto-Select Top 3</button>
             </div>
+        <div class="table-wrap">
         <table id="compsTable">
             <thead>
                 <tr>
@@ -102,10 +187,10 @@
                         <b>${{ "{:,.0f}".format(comp.reconciled_value) }}</b>
                         <div style="font-size: 11px; margin-top: 5px;">
                             <a href="#" onclick="event.preventDefault(); document.getElementById('adj-{{ loop.index }}').style.display = document.getElementById('adj-{{ loop.index }}').style.display === 'none' ? 'block' : 'none';" style="color: #2980b9; text-decoration: none;">Show Math ▼</a>
-                            <div id="adj-{{ loop.index }}" style="display: none; background: #fff; padding: 5px; border: 1px solid #ddd; margin-top: 5px; border-radius: 3px;">
+                            <div id="adj-{{ loop.index }}" class="math-panel">
                                 {% for key, val in comp.adjustments.items() %}
                                     {% if val != 0 %}
-                                        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f1f1; padding: 2px 0;">
+                                        <div class="math-line">
                                             <span>{{ key|title }}:</span>
                                             <span style="color: {{ 'green' if val > 0 else 'red' }}">{{ "+$" if val > 0 else "-$" }}{{ "{:,.0f}".format(val|abs) }}</span>
                                         </div>
@@ -115,30 +200,31 @@
                         </div>
                     </td>
                     <td>
-                        <button type="button" class="btn-select {% if comp.is_selected %}selected{% endif %}" id="sel-{{ loop.index }}" onclick="toggleSelect({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">
-                            {{ 'Selected' if comp.is_selected else 'Select' }}
-                        </button>
-                        <button type="button" class="btn-reject" onclick="openRejectModal({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">Reject</button>
+                        <div class="action-cell">
+                            <button type="button" class="btn-select {% if comp.is_selected %}selected{% endif %}" id="sel-{{ loop.index }}" onclick="toggleSelect({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">
+                                {{ 'Selected' if comp.is_selected else 'Select' }}
+                            </button>
+                            <button type="button" class="btn-reject" onclick="openRejectModal({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">Reject</button>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
+        </div>
 
         {% set manual_count = comps | selectattr('status', 'equalto', 'MANUAL') | list | length %}
         {% if manual_count < 5 %}
-        <div class="card" style="margin-top: 20px; background: #fff; padding: 20px; border: 1px solid #ddd;">
-            <h3 style="margin-top: 0; color: #2c3e50;">Add Your Own Comp ({{ manual_count }}/5)</h3>
-            <p style="font-size: 14px; color: #7f8c8d;">Have a specific sale in mind that wasn't discovered? Enter it here.</p>
+        <div class="card manual-card" style="margin-top: 20px;">
+            <h3>Add Your Own Comp ({{ manual_count }}/5)</h3>
+            <p>Have a specific sale in mind that wasn't discovered? Enter it here.</p>
             <div id="manual-comp-form">
                 <input type="hidden" id="manual_property_id" value="{{ subject_id }}">
                 <input type="hidden" id="manual_subject_address" value="{{ subject.address|escape }}">
-                <div style="margin-bottom: 15px;">
-                    <input type="text" id="manual_address" placeholder="Property Address (e.g. 123 Main St)" style="width: calc(100% - 22px); padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box; display: block; margin-bottom: 10px;">
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="number" id="manual_price" placeholder="Sale Price ($)" style="width: 200px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
-                        <button type="button" id="manual_btn" onclick="submitManualComp()" style="padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Add Comp</button>
-                    </div>
+                <div class="manual-fields">
+                    <input type="text" id="manual_address" placeholder="Property Address (e.g. 123 Main St)">
+                    <input type="number" id="manual_price" placeholder="Sale Price ($)">
+                    <button type="button" id="manual_btn" class="btn-auto" onclick="submitManualComp()">Add Comp</button>
                 </div>
                 <div id="manual_msg" style="margin-top: 10px; font-size: 13px;"></div>
             </div>
@@ -149,15 +235,15 @@
         </div>
         {% endif %}
 
-            <div class="card" style="background: #eaf3fb; border-color: #aed6f1; margin-top: 20px;">
-                <h3 style="margin-top: 0; color: #1f618d;">Finalize Valuation</h3>
-                <p style="font-size: 14px;">Once you've selected exactly 3 comparable sales, click below to generate your final adjusted valuation and PDF package.</p>
+            <div class="card finalize-card" style="background: #edf7fb; border-color: #b6d7e5; margin-top: 20px;">
+                <h3>Finalize Valuation</h3>
+                <p>Once you've selected exactly 3 comparable sales, click below to generate your final adjusted valuation and PDF package.</p>
                 <input type="hidden" name="address" value="{{ subject.address }}">
                 <input type="hidden" name="subject_id" value="{{ subject_id }}">
                 <input type="hidden" name="skip_discovery" value="true">
                 <input type="hidden" name="finalize" value="true">
                 
-                <button type="submit" class="btn-finalize">Review & Finalize →</button>
+                <button type="submit" class="btn-finalize">Review & Finalize</button>
             </div>
         </form>
     </div>
