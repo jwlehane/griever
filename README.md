@@ -73,10 +73,18 @@ export RAPIDAPI_KEY=your_key_here
 ./deploy_cloud.sh
 ```
 
-The Cloud Run runtime service account must be able to read the secret:
+The Cloud Run runtime service account must be able to read the secret. A
+project Owner or Secret Manager Admin should grant access to the specific
+secret(s):
 
 ```bash
-gcloud projects add-iam-policy-binding double-zenith-89117 \
+gcloud secrets add-iam-policy-binding tax-grieve-app-rapidapi-key \
+  --project double-zenith-89117 \
+  --member serviceAccount:529334528547-compute@developer.gserviceaccount.com \
+  --role roles/secretmanager.secretAccessor
+
+gcloud secrets add-iam-policy-binding nygriever-rapidapi-key \
+  --project double-zenith-89117 \
   --member serviceAccount:529334528547-compute@developer.gserviceaccount.com \
   --role roles/secretmanager.secretAccessor
 ```
