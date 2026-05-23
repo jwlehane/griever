@@ -1,9 +1,12 @@
 import sys
 import os
+import datetime as dt
+from unittest.mock import MagicMock, call, patch
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from app.core import TaxGrieveCore
+from app.db import init_schema
 
 
 def _full_subject():
@@ -124,3 +127,126 @@ def test_outlier_detection():
     outlier_result = next(r for r in result["comps"] if r['address'] == 'Outlier')
     assert outlier_result['is_outlier'] is True
     assert market_value == 500000
+
+
+def _sold_ms(date_str):
+    return int(dt.datetime.strptime(date_str, "%Y-%m-%d").timestamp() * 1000)
+
+
+def _discovery_subject():
+    return {
+        'address': '33 Cedar Heights Rd',
+        'sbl': '13508900627100002991200000',
+        'sqft': 1776,
+        'acreage': 2.0,
+        'bedrooms': 4,
+        'bathrooms': 1.5,
+        'year_built': 1947,
+        'assessment_2026': 741400,
+        'property_class': '210',
+        'latitude': 41.94,
+        'longitude': -73.91,
+    }
+
+
+def _raw_comp(**overrides):
+    comp = {
+        'zpid': 'z-94',
+        'streetAddress': '94 Hill Top Rd',
+        'addressCity': 'Rhinebeck',
+        'addressState': 'NY',
+        'zipcode': '12572',
+        'homeStatus': 'RECENTLY_SOLD',
+        'homeType': 'SINGLE_FAMILY',
+        'price': 533500,
+        'livingArea': 1666,
+        'bedrooms': 4,
+        'bathrooms': 2,
+        'yearBuilt': 1947,
+        'lotAreaValue': 2.1,
+        'lotAreaUnit': 'acres',
+        'dateSold': _sold_ms('2026-03-20'),
+        'latitude': 41.95,
+        'longitude': -73.91,
+    }
+    comp.update(overrides)
+    return comp
+
+
+def _official_comp(**overrides):
+    comp = {
+        'address': '94 Hilltop Rd',
+        'sbl': '13508900637000002131450000',
+        'sqft': 1666,
+        'acreage': 2.1,
+        'bedrooms': 4,
+        'bathrooms': 2,
+        'year_built': 1947,
+        'assessment_2026': 698300,
+        'property_class': '210',
+    }
+    comp.update(overrides)
+    return comp
+
+
+def test_forced_verification_tries_city_context_then_validated_broad_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv('RAPIDAPI_KEY', 'test-key')
+    db_path = tmp_path / 'griever.db'
+    init_schema(sqlite_path=str(db_path))
+    core = TaxGrieveCore(db_path=str(db_path))
+    subject = _discovery_subject()
+    subject_id = core.ensure_property(subject)
+
+    county = MagicMock()
+    county.get_town_from_identifier.return_value = 'Rhinebeck'
+    county.search_address.side_effect = [None, {'parcelgrid': 'COMP-SBL'}]
+    county.get_full_rps_data.return_value = _official_comp()
+
+    with patch('app.core.CountyFactory.get_county_handler', return_value=county), \
+         patch.object(core, '_fetch_rapidapi_comps', return_value=[_raw_comp()]), \
+         patch('app.orpts.OrptsClient') as orpts_client:
+        orpts_client.return_value.get_municipal_rates.return_value = {'rar': 100.0}
+        events = list(core.discover_comps_live(subject, subject_id, force_verify=True))
+
+    verified = [event['comp'] for event in events if event.get('status') == 'verified']
+    assert len(verified) == 1
+    assert verified[0]['address'] == '94 Hilltop Rd'
+    assert verified[0]['grade'] == 'C'
+    county.search_address.assert_has_calls([
+        call('94 Hill Top Rd, Rhinebeck, NY 12572'),
+        call('94 Hill Top Rd'),
+    ])
+
+
+def test_forced_verification_rejects_broad_fallback_address_mismatch(tmp_path, monkeypatch):
+    monkeypatch.setenv('RAPIDAPI_KEY', 'test-key')
+    db_path = tmp_path / 'griever.db'
+    init_schema(sqlite_path=str(db_path))
+    core = TaxGrieveCore(db_path=str(db_path))
+    subject = _discovery_subject()
+    subject_id = core.ensure_property(subject)
+
+    county = MagicMock()
+    county.get_town_from_identifier.return_value = 'Rhinebeck'
+    county.search_address.return_value = {'parcelgrid': 'BAD-SBL'}
+    county.get_full_rps_data.return_value = _official_comp(
+        address='99 Mountain View Rd',
+        sbl='13240000646900004354550000',
+    )
+    raw = _raw_comp(
+        zpid='bad-mountain',
+        streetAddress='9 Mountain View Court',
+        livingArea=1700,
+    )
+
+    with patch('app.core.CountyFactory.get_county_handler', return_value=county), \
+         patch.object(core, '_fetch_rapidapi_comps', return_value=[raw]), \
+         patch('app.orpts.OrptsClient') as orpts_client:
+        orpts_client.return_value.get_municipal_rates.return_value = {'rar': 100.0}
+        events = list(core.discover_comps_live(subject, subject_id, force_verify=True))
+
+    assert [event for event in events if event.get('status') == 'verified'] == []
+    assert any(
+        event.get('status') == 'resuming' and 'County verification failed' in event.get('message', '')
+        for event in events
+    )

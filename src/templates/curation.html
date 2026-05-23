@@ -70,12 +70,13 @@
             background: white;
             color: var(--text);
         }
-        button { min-height: 42px; padding: 9px 15px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
+        button { width: auto; min-height: 42px; padding: 9px 15px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
         .btn-select { background: #e0e0e0; color: #333; }
         .btn-select.selected { background: #27ae60; color: white; }
         .btn-reject { background: var(--danger); color: white; }
         .btn-finalize { width: 100%; min-height: 50px; padding: 14px; background: var(--accent); color: white; font-size: 17px; margin-top: 10px; }
         .btn-finalize:hover { background: #1c4962; }
+        .btn-finalize:disabled { background: #9eaba8; cursor: not-allowed; }
         .btn-auto { background: var(--primary); color: white; padding: 10px 20px; font-size: 14px; }
         .action-cell { display: flex; gap: 8px; flex-wrap: wrap; }
         .settings-panel {
@@ -89,6 +90,13 @@
         .field-row { display: flex; gap: 18px; align-items: end; flex-wrap: wrap; }
         .field-row label { display: grid; gap: 6px; min-width: 190px; font-size: 14px; }
         .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 12px; }
+        .selection-banner { display: flex; justify-content: space-between; align-items: center; gap: 16px; border-color: #b6d7e5; background: #edf7fb; }
+        .selection-banner.ready { border-color: #9fd2ae; background: #eef8f1; }
+        .selection-banner h3 { margin: 0 0 4px; }
+        .selection-banner p { margin: 0; color: var(--muted); font-size: 13px; }
+        .selection-count { min-width: 104px; text-align: center; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: white; }
+        .selection-count b { display: block; font-size: 28px; line-height: 1; color: var(--accent); }
+        .selection-count span { display: block; margin-top: 4px; font-size: 11px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.4px; }
         .manual-fields { display: flex; gap: 10px; align-items: center; }
         .manual-fields input:first-child { flex: 1 1 280px; }
         .manual-fields input:nth-child(2) { flex: 0 1 200px; }
@@ -111,6 +119,8 @@
             body { padding: 0; background: white; }
             .container { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; padding: 24px 16px; }
             .section-heading { align-items: stretch; flex-direction: column; }
+            .selection-banner { flex-direction: column; align-items: stretch; }
+            .selection-count { width: 100%; }
             .btn-auto { width: 100%; }
             .field-row, .manual-fields { flex-direction: column; align-items: stretch; }
             .field-row label, .manual-fields input, .manual-fields button { width: 100%; min-width: 0; }
@@ -118,6 +128,14 @@
             .manual-fields input:first-child,
             .manual-fields input:nth-child(2) { flex: none; }
             .modal-content { margin: 8vh auto; }
+            table { min-width: 0; border-collapse: separate; border-spacing: 0 10px; }
+            thead { display: none; }
+            tbody tr { display: block; border: 1px solid var(--border); border-radius: 8px; background: white; padding: 8px; }
+            tbody td { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; border-bottom: 1px solid #eef1f0; padding: 10px 8px; }
+            tbody td:last-child { border-bottom: 0; }
+            tbody td::before { content: attr(data-label); color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; }
+            .action-cell { justify-content: stretch; }
+            .action-cell button { flex: 1; }
         }
     </style>
 </head>
@@ -136,6 +154,24 @@
             <p>{{ subject.bedrooms }} Beds, {{ subject.bathrooms }} Baths, {{ subject.sqft }} Sqft, Built {{ subject.year_built }}</p>
         </div>
 
+        {% set selected_count = comps | selectattr('is_selected') | list | length %}
+        <div id="selection-banner" class="card selection-banner {% if selected_count >= 3 %}ready{% endif %}">
+            <div>
+                <h3>Comp Selection</h3>
+                <p id="selection-copy">
+                    {% if selected_count >= 3 %}
+                    Ready to finalize. Review your selections, then generate the report.
+                    {% else %}
+                    Select at least 3 defensible comps before finalizing.
+                    {% endif %}
+                </p>
+            </div>
+            <div class="selection-count" aria-live="polite">
+                <b id="selected-count">{{ selected_count }}</b>
+                <span>of 3 selected</span>
+            </div>
+        </div>
+
         <form action="/report" method="POST" id="finalize-form">
             <div class="settings-panel">
                 <h3>Adjust Base Pricing</h3>
@@ -143,11 +179,11 @@
                 <div class="field-row">
                 <label>
                     <b>Renovation Year:</b>
-                    <input type="number" id="curation-renov" name="renovation_year" value="{{ renovation_year or '' }}" placeholder="YYYY" min="1900" max="2026" onchange="updatePricing('{{ subject.address|escape }}', {{ subject_id }})">
+                    <input type="number" id="curation-renov" name="renovation_year" value="{{ renovation_year or '' }}" placeholder="YYYY" min="1900" max="2026" onchange='updatePricing({{ subject.address|tojson }}, {{ subject_id }})'>
                 </label>
                 <label>
                     <b>Subject Condition:</b>
-                    <select id="curation-cond" name="condition" onchange="updatePricing('{{ subject.address|escape }}', {{ subject_id }})">
+                    <select id="curation-cond" name="condition" onchange='updatePricing({{ subject.address|tojson }}, {{ subject_id }})'>
                         <option value="average" {% if condition == 'average' %}selected{% endif %}>Average</option>
                         <option value="below" {% if condition == 'below' %}selected{% endif %}>Below Average (-15%)</option>
                         <option value="above" {% if condition == 'above' %}selected{% endif %}>Above Average (+10%)</option>
@@ -176,14 +212,14 @@
             <tbody>
                 {% for comp in comps %}
                 <tr id="row-{{ loop.index }}" data-outlier="{{ 'true' if comp.is_outlier else 'false' }}" data-score="{{ comp.similarity_score }}">
-                    <td title="Grade is based on similarity score (Sqft 40%, Age 30%, Acreage 20%, Distance 10%) with a penalty for sales older than 12 months.">
+                    <td data-label="Match" title="Grade is based on similarity score (Sqft 40%, Age 30%, Acreage 20%, Distance 10%) with a penalty for sales older than 12 months.">
                         <span class="grade grade-{{ comp.grade }}">{{ comp.grade }}</span><br>
                         <small>{{ "%.1f"|format(comp.similarity_score) }}%</small>
                     </td>
-                    <td><b>{{ comp.address }}</b><br><small>{{ comp.distance_miles }} miles away</small></td>
-                    <td>${{ "{:,.0f}".format(comp.sale_price) }}<br><small>{{ comp.sale_date }}</small></td>
-                    <td><small>{{ comp.sqft }} sqft<br>{{ comp.bedrooms }}bd/{{ comp.bathrooms }}ba, Blt {{ comp.year_built }}</small></td>
-                    <td>
+                    <td data-label="Address"><b>{{ comp.address }}</b><br><small>{{ comp.distance_miles }} miles away</small></td>
+                    <td data-label="Sale">${{ "{:,.0f}".format(comp.sale_price) }}<br><small>{{ comp.sale_date }}</small></td>
+                    <td data-label="Specs"><small>{{ comp.sqft }} sqft<br>{{ comp.bedrooms }}bd/{{ comp.bathrooms }}ba, Blt {{ comp.year_built }}</small></td>
+                    <td data-label="Adjusted">
                         <b>${{ "{:,.0f}".format(comp.reconciled_value) }}</b>
                         <div style="font-size: 11px; margin-top: 5px;">
                             <a href="#" onclick="event.preventDefault(); document.getElementById('adj-{{ loop.index }}').style.display = document.getElementById('adj-{{ loop.index }}').style.display === 'none' ? 'block' : 'none';" style="color: #2980b9; text-decoration: none;">Show Math ▼</a>
@@ -199,12 +235,12 @@
                             </div>
                         </div>
                     </td>
-                    <td>
+                    <td data-label="Action">
                         <div class="action-cell">
-                            <button type="button" class="btn-select {% if comp.is_selected %}selected{% endif %}" id="sel-{{ loop.index }}" onclick="toggleSelect({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">
+                            <button type="button" class="btn-select {% if comp.is_selected %}selected{% endif %}" id="sel-{{ loop.index }}" onclick='toggleSelect({{ loop.index }}, {{ subject_id }}, {{ (comp.zpid or '')|tojson }}, {{ comp.address|tojson }})'>
                                 {{ 'Selected' if comp.is_selected else 'Select' }}
                             </button>
-                            <button type="button" class="btn-reject" onclick="openRejectModal({{ loop.index }}, {{ subject_id }}, '{{ comp.zpid or '' }}', '{{ comp.address }}')">Reject</button>
+                            <button type="button" class="btn-reject" onclick='openRejectModal({{ loop.index }}, {{ subject_id }}, {{ (comp.zpid or '')|tojson }}, {{ comp.address|tojson }})'>Reject</button>
                         </div>
                     </td>
                 </tr>
@@ -243,7 +279,7 @@
                 <input type="hidden" name="skip_discovery" value="true">
                 <input type="hidden" name="finalize" value="true">
                 
-                <button type="submit" class="btn-finalize">Review & Finalize</button>
+                <button id="finalize-btn" type="submit" class="btn-finalize" {% if selected_count < 3 %}disabled{% endif %}>Review & Finalize</button>
             </div>
         </form>
     </div>
@@ -271,6 +307,209 @@
         </div>
     </div>
     
+    <script>
+        function currentSelectedCount() {
+            return Array.from(document.querySelectorAll('.btn-select.selected'))
+                .filter(btn => {
+                    const row = btn.closest('tr');
+                    return !row || row.style.display !== 'none';
+                }).length;
+        }
+
+        function updateSelectionSummary() {
+            const count = currentSelectedCount();
+            const banner = document.getElementById('selection-banner');
+            const countEl = document.getElementById('selected-count');
+            const copyEl = document.getElementById('selection-copy');
+            const finalizeBtn = document.getElementById('finalize-btn');
+            if (countEl) countEl.innerText = count;
+            if (banner) banner.classList.toggle('ready', count >= 3);
+            if (copyEl) {
+                copyEl.innerText = count >= 3
+                    ? 'Ready to finalize. Review your selections, then generate the report.'
+                    : `Select ${3 - count} more defensible comp${3 - count === 1 ? '' : 's'} before finalizing.`;
+            }
+            if (finalizeBtn) finalizeBtn.disabled = count < 3;
+        }
+
+        function toggleSelect(idx, subjectId, zpid, address) {
+            const btn = document.getElementById(`sel-${idx}`);
+            const isSelected = btn.classList.contains('selected');
+            const endpoint = isSelected ? '/unselect_comp' : '/select_comp';
+            const formData = new FormData();
+            formData.append('property_id', subjectId);
+            if (zpid && zpid !== 'None') formData.append('zpid', zpid);
+            formData.append('address', address);
+
+            btn.disabled = true;
+            fetch(endpoint, { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        btn.classList.toggle('selected', !isSelected);
+                        btn.innerText = isSelected ? 'Select' : 'Selected';
+                        updateSelectionSummary();
+                    }
+                })
+                .finally(() => { btn.disabled = false; });
+        }
+
+        function openRejectModal(idx, subjectId, zpid, address) {
+            document.getElementById('rejRow').value = idx;
+            document.getElementById('rejSubjId').value = subjectId;
+            document.getElementById('rejZpid').value = zpid;
+            document.getElementById('rejAddr').value = address;
+            document.getElementById('rejectModal').style.display = 'block';
+        }
+
+        function confirmReject() {
+            const idx = document.getElementById('rejRow').value;
+            const formData = new FormData();
+            formData.append('property_id', document.getElementById('rejSubjId').value);
+            formData.append('address', document.getElementById('rejAddr').value);
+            const zpid = document.getElementById('rejZpid').value;
+            if (zpid && zpid !== 'None') formData.append('zpid', zpid);
+            formData.append('reason', document.getElementById('rejectReason').value);
+
+            fetch('/reject_comp', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if(data.status === 'success') {
+                        document.getElementById(`row-${idx}`).style.display = 'none';
+                        document.getElementById('rejectModal').style.display = 'none';
+                        updateSelectionSummary();
+                    }
+                });
+        }
+
+        document.addEventListener('submit', function(e) {
+            if (e.target && e.target.id === 'finalize-form') {
+                const selectedCount = currentSelectedCount();
+                if (selectedCount < 3) {
+                    e.preventDefault();
+                    updateSelectionSummary();
+                    const banner = document.getElementById('selection-banner');
+                    if (banner) banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    alert('Please select at least 3 comps to finalize your valuation.');
+                }
+            }
+        });
+
+        function sortTable(n) {
+            const table = document.getElementById('compsTable');
+            let switching = true;
+            let dir = 'desc';
+            let switchcount = 0;
+            while (switching) {
+                switching = false;
+                const rows = table.rows;
+                for (let i = 1; i < (rows.length - 1); i++) {
+                    const x = rows[i].getElementsByTagName('TD')[n];
+                    const y = rows[i + 1].getElementsByTagName('TD')[n];
+                    const xVal = x.innerText.replace(/[^0-9.-]+/g, '');
+                    const yVal = y.innerText.replace(/[^0-9.-]+/g, '');
+                    const cmpX = parseFloat(xVal) || x.innerHTML.toLowerCase();
+                    const cmpY = parseFloat(yVal) || y.innerHTML.toLowerCase();
+                    const shouldSwitch = dir === 'asc' ? cmpX > cmpY : cmpX < cmpY;
+                    if (shouldSwitch) {
+                        rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                        switching = true;
+                        switchcount++;
+                        break;
+                    }
+                }
+                if (!switching && switchcount === 0 && dir === 'desc') {
+                    dir = 'asc';
+                    switching = true;
+                }
+            }
+        }
+
+        function updatePricing(subjectAddress, subjectId) {
+            const formData = new FormData();
+            formData.append('address', subjectAddress);
+            formData.append('subject_id', subjectId);
+            formData.append('update_curation', 'true');
+            formData.append('renovation_year', document.getElementById('curation-renov').value);
+            formData.append('condition', document.getElementById('curation-cond').value);
+            document.querySelector('table').style.opacity = '0.5';
+
+            fetch('/report', { method: 'POST', body: formData })
+                .then(response => response.text())
+                .then(html => { document.body.innerHTML = html; })
+                .catch(error => console.error('Error updating pricing:', error));
+        }
+
+        async function submitManualComp() {
+            const btn = document.getElementById('manual_btn');
+            const msg = document.getElementById('manual_msg');
+            const addr = document.getElementById('manual_address').value;
+            const price = document.getElementById('manual_price').value;
+            const property_id = document.getElementById('manual_property_id').value;
+            const subject_address = document.getElementById('manual_subject_address').value;
+
+            if (!addr || !price) {
+                msg.innerText = 'Please enter both an address and a price.';
+                msg.style.color = '#e74c3c';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = 'Adding...';
+            msg.innerText = 'Verifying address with county records. This may take a moment...';
+            msg.style.color = '#2980b9';
+
+            const formData = new URLSearchParams();
+            formData.append('property_id', property_id);
+            formData.append('address', addr);
+            formData.append('price', price);
+
+            try {
+                const response = await fetch('/add_comp', {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: formData.toString()
+                });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    msg.innerText = 'Added. Reloading table...';
+                    msg.style.color = '#27ae60';
+                    updatePricing(subject_address, property_id);
+                } else {
+                    msg.innerText = 'Error: ' + data.message;
+                    msg.style.color = '#e74c3c';
+                    btn.disabled = false;
+                    btn.innerText = 'Add Comp';
+                }
+            } catch (err) {
+                msg.innerText = 'Network error. Please try again.';
+                msg.style.color = '#e74c3c';
+                btn.disabled = false;
+                btn.innerText = 'Add Comp';
+            }
+        }
+
+        function autoSelectTop3() {
+            const rows = Array.from(document.querySelectorAll('#compsTable tbody tr'));
+            const validRows = rows.filter(row => row.getAttribute('data-outlier') !== 'true');
+            validRows.sort((a, b) => parseFloat(b.getAttribute('data-score')) - parseFloat(a.getAttribute('data-score')));
+            const top3 = validRows.slice(0, 3);
+            rows.forEach(row => {
+                const btn = row.querySelector('.btn-select');
+                if (!btn) return;
+                const isSelected = btn.classList.contains('selected');
+                const shouldBeSelected = top3.includes(row);
+                if (isSelected && !shouldBeSelected) btn.click();
+                else if (!isSelected && shouldBeSelected) btn.click();
+            });
+            setTimeout(updateSelectionSummary, 350);
+        }
+
+        updateSelectionSummary();
+    </script>
     
 </body>
 </html>
