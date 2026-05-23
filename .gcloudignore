@@ -4,6 +4,7 @@ tax-grieve-env
 __pycache__
 *.pyc
 .pytest_cache
+.playwright-mcp
 *.db
 *.pdf
 node_modules
