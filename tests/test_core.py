@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 # Add src to path so we can import app.core
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from app.core import TaxGrieveCore
+from app.core import MarketDataSourceError, TaxGrieveCore
 
 def test_valuation_math_basic():
     """Verify that valuation math returns consistent results when no adjustments are needed."""
@@ -143,6 +143,23 @@ def test_finish_subject_profile_uses_market_tax_value_as_current_assessment():
     assert result['sqft'] == 2413
     assert result['assessment_2025'] == 448936
     assert result['assessment_2026'] == 448936
+
+
+def test_rapidapi_quota_raises_clear_error(monkeypatch):
+    core = TaxGrieveCore(db_path=':memory:')
+    monkeypatch.setenv('RAPIDAPI_KEY', 'test-key')
+
+    class Response:
+        status_code = 429
+
+        def raise_for_status(self):
+            raise AssertionError("raise_for_status should not be reached for quota errors")
+
+    with patch('requests.get', return_value=Response()):
+        with pytest.raises(MarketDataSourceError) as exc:
+            core._fetch_rapidapi_comps('Kingston, NY', 1, 99, 'RECENTLY_SOLD')
+
+    assert "monthly quota is exhausted" in str(exc.value)
 
 def test_comp_verification_address_includes_city_and_zip():
     core = TaxGrieveCore(db_path=':memory:')

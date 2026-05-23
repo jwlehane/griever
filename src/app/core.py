@@ -12,6 +12,11 @@ from app.counties.factory import CountyFactory
 from app.exceptions import CountyAPIError
 from app.equalization import get_rate as _er_rate, implied_market_value
 
+
+class MarketDataSourceError(RuntimeError):
+    """Raised when the live sales-listing provider cannot return market data."""
+
+
 class TaxGrieveCore:
     # Cap on how many filtered comps we verify against the county API and
     # store. Verification is the slowest step (~0.3-1s/comp), and the
@@ -236,7 +241,7 @@ class TaxGrieveCore:
 
         api_key = os.getenv("RAPIDAPI_KEY")
         if not api_key:
-            return []
+            raise MarketDataSourceError("RapidAPI key is not configured, so live sales cannot be fetched.")
 
         url = "https://real-time-real-estate-data.p.rapidapi.com/search"
         headers = {
@@ -253,13 +258,23 @@ class TaxGrieveCore:
 
         try:
             resp = requests.get(url, headers=headers, params=params, timeout=15)
+            if resp.status_code == 429:
+                raise MarketDataSourceError(
+                    "RapidAPI monthly quota is exhausted for the deployed key. "
+                    "Live comparable sales cannot be fetched until the plan resets, "
+                    "the plan is upgraded, or a different key is deployed."
+                )
             resp.raise_for_status()
             data = resp.json().get('data', [])
             set_rapidapi_cached(location, beds_min, beds_max, status, data)
             return data
+        except MarketDataSourceError:
+            raise
         except Exception as e:
             print(f"RapidAPI fetch error: {e}")
-            return []
+            raise MarketDataSourceError(
+                "RapidAPI market search failed. Please retry shortly or check the deployed API key and plan status."
+            )
 
     def get_subject_profile(self, address_string):
         """Identifies property via County, then enriches with RapidAPI."""
@@ -538,11 +553,19 @@ class TaxGrieveCore:
         yield {"status": "searching", "message": f"Querying RapidAPI for sold listings in {location} ({beds_min}-{beds_max} beds)..."}
         
         try:
-            raw_comps = self._fetch_rapidapi_comps(location, beds_min, beds_max, "RECENTLY_SOLD")
+            try:
+                raw_comps = self._fetch_rapidapi_comps(location, beds_min, beds_max, "RECENTLY_SOLD")
+            except MarketDataSourceError as e:
+                yield {"status": "error", "message": str(e)}
+                return
             
             if not raw_comps:
                 yield {"status": "searching", "message": "No specific matches. Trying broader search..."}
-                raw_comps = self._fetch_rapidapi_comps(location, 0, 99, "RECENTLY_SOLD")
+                try:
+                    raw_comps = self._fetch_rapidapi_comps(location, 0, 99, "RECENTLY_SOLD")
+                except MarketDataSourceError as e:
+                    yield {"status": "error", "message": str(e)}
+                    return
 
             # Property-class and same-municipality filtering.
             from app.property_class import expected_hometype
