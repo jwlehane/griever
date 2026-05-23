@@ -20,7 +20,7 @@ class TaxGrieveCore:
     # heuristic and keep the top N, so the comps we drop are the least
     # similar ones, not random ones. Tune here if thin markets need a wider net.
     MAX_COMPS_TO_VERIFY = 15
-    MIN_DEFENSIBLE_SCORE = 50.0
+    MIN_DEFENSIBLE_SCORE = 45.0
 
     def __init__(self, db_path='grievance_data.db'):
         self.db_path = db_path
@@ -652,6 +652,7 @@ class TaxGrieveCore:
 
                 full_addr = rc.get('streetAddress', rc.get('address', ''))
                 if not full_addr: continue
+                verification_addr = self._comp_verification_address(rc, full_addr)
                 
                 comp_identifier = rc.get('parcelNumber', rc.get('resoFacts', {}).get('parcelNumber'))
                 official_data = None
@@ -669,10 +670,20 @@ class TaxGrieveCore:
                     if comp_identifier:
                         official_data = county.get_full_rps_data(comp_identifier)
                     elif force_verify:
-                        # Fallback to slow address search if forced
-                        search_res = county.search_address(full_addr)
+                        # Fallback to address search if forced. Try city/ZIP
+                        # first, then broad county lookup for postal-city edge
+                        # cases; validate broad hits before trusting them.
+                        search_res = county.search_address(verification_addr)
+                        if not search_res and verification_addr != full_addr:
+                            search_res = county.search_address(full_addr)
                         if search_res and search_res.get('parcelgrid'):
                             official_data = county.get_full_rps_data(search_res.get('parcelgrid'))
+                            if official_data and not self._addresses_match_for_verification(full_addr, official_data.get('address', '')):
+                                print(
+                                    f"  verify mismatch for {safe_addr(full_addr)} -> "
+                                    f"{safe_addr(official_data.get('address'))}"
+                                )
+                                official_data = None
                 except (CountyAPIError, Exception) as ve:
                     print(f"  verify skipped for {safe_addr(full_addr)}: {ve}")
                     official_data = None
@@ -795,6 +806,67 @@ class TaxGrieveCore:
             yield {"status": "error", "message": f"Discovery Error: {str(e)}"}
         finally:
             conn.close()
+
+    def _comp_verification_address(self, raw_comp, street_address):
+        """Return a county-searchable comp address with city context."""
+        street = (street_address or '').strip()
+        city = (raw_comp.get('addressCity') or raw_comp.get('city') or '').strip()
+        state = (raw_comp.get('addressState') or raw_comp.get('state') or 'NY').strip()
+        zip_code = str(raw_comp.get('zipcode') or raw_comp.get('zip') or raw_comp.get('postalCode') or '').strip()
+        if not city:
+            return street
+        parts = [street, city]
+        state_zip = " ".join(p for p in [state, zip_code] if p).strip()
+        if state_zip:
+            parts.append(state_zip)
+        return ", ".join(parts)
+
+    def _addresses_match_for_verification(self, input_address, official_address):
+        left = self._address_signature(input_address)
+        right = self._address_signature(official_address)
+        if not left or not right:
+            return False
+        left_start, left_end, left_street, left_suffix = left
+        right_start, right_end, right_street, right_suffix = right
+        if max(left_start, right_start) > min(left_end, right_end):
+            return False
+        if left_street != right_street:
+            return False
+        if left_suffix and right_suffix and left_suffix != right_suffix:
+            return False
+        return True
+
+    def _address_signature(self, address):
+        head = (address or '').split(',')[0].upper().strip()
+        head = re.sub(r"[#].*$", "", head)
+        head = re.sub(r"\s+", " ", head)
+        m = re.match(r"^(\d+)(?:\s*-\s*(\d+))?\s+(.+)$", head)
+        if not m:
+            return None
+        start = int(m.group(1))
+        end = int(m.group(2) or start)
+        if end < start:
+            start, end = end, start
+        street = re.sub(r"[^A-Z0-9 ]+", " ", m.group(3))
+        street = re.sub(r"\s+", " ", street).strip()
+        suffix_map = {
+            "STREET": "ST", "ST": "ST",
+            "ROAD": "RD", "RD": "RD",
+            "AVENUE": "AVE", "AVE": "AVE",
+            "DRIVE": "DR", "DR": "DR",
+            "LANE": "LN", "LN": "LN",
+            "COURT": "CT", "CT": "CT",
+            "PLACE": "PL", "PL": "PL",
+            "TURNPIKE": "TPKE", "TPKE": "TPKE",
+            "BOULEVARD": "BLVD", "BLVD": "BLVD",
+        }
+        tokens = street.split()
+        if len(tokens) >= 2 and suffix_map.get(tokens[-1]) == suffix_map.get(tokens[-2]):
+            tokens.pop()
+        suffix = None
+        if tokens and tokens[-1] in suffix_map:
+            suffix = suffix_map[tokens.pop()]
+        return start, end, "".join(tokens), suffix
 
     def _passes_hard_filters(self, subject, comp, valuation_date=None):
         """
@@ -976,7 +1048,7 @@ class TaxGrieveCore:
         
         if final_score >= 85: return "A"
         if final_score >= 70: return "B"
-        if final_score >= 50: return "C"
+        if final_score >= self.MIN_DEFENSIBLE_SCORE: return "C"
         return "F"
 
     def calculate_valuation(self, subject, comps, adjs=None, renovation_year=None,

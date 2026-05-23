@@ -79,6 +79,33 @@ def test_grading_uses_same_rar_as_similarity_score():
     assert grade == "C"
 
 
+def test_c_grade_starts_at_reviewable_threshold():
+    core = TaxGrieveCore(db_path=':memory:')
+    subject = {
+        'sqft': 1776,
+        'year_built': 1947,
+        'acreage': 0.5,
+        'bedrooms': 4,
+        'bathrooms': 1.5,
+        'assessment_2026': 741400,
+    }
+    comp = {
+        'sqft': 1536,
+        'year_built': 1940,
+        'acreage': 0.5,
+        'bedrooms': 3,
+        'bathrooms': 1,
+        'sale_price': 285000,
+        'sale_date': '2026-03-20',
+    }
+
+    score = core.calculate_similarity(subject, comp, valuation_date='2025-07-01')
+    grade = core.calculate_similarity_grade(subject, comp, valuation_date='2025-07-01')
+
+    assert score >= core.MIN_DEFENSIBLE_SCORE
+    assert grade == "C"
+
+
 def test_valuation_enforcement():
     core = TaxGrieveCore(db_path=':memory:')
 

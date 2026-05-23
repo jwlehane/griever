@@ -143,3 +143,42 @@ def test_finish_subject_profile_uses_market_tax_value_as_current_assessment():
     assert result['sqft'] == 2413
     assert result['assessment_2025'] == 448936
     assert result['assessment_2026'] == 448936
+
+def test_comp_verification_address_includes_city_and_zip():
+    core = TaxGrieveCore(db_path=':memory:')
+
+    result = core._comp_verification_address(
+        {'addressCity': 'Kingston', 'addressState': 'NY', 'zipcode': '12401'},
+        '168-170 Lucas Avenue Avenue',
+    )
+
+    assert result == '168-170 Lucas Avenue Avenue, Kingston, NY 12401'
+
+
+@pytest.mark.parametrize(
+    ("input_address", "official_address"),
+    [
+        ("1562 Centre Road", "1562 Centre Rd"),
+        ("168-170 Lucas Avenue Avenue", "168-170 Lucas Ave"),
+        ("94 Hill Top Rd", "94 Hilltop Rd"),
+    ],
+)
+def test_address_verification_accepts_same_parcel_address(input_address, official_address):
+    core = TaxGrieveCore(db_path=':memory:')
+
+    assert core._addresses_match_for_verification(input_address, official_address)
+
+
+@pytest.mark.parametrize(
+    ("input_address", "official_address"),
+    [
+        ("9 Mountain View Court", "99 Mountain View Rd"),
+        ("25 Mountain View Court", "25 Mountain View Rd"),
+        ("5 Orchard St", "51 Orchard Pl"),
+        ("5 Orchard St", "5 Orchard Pl"),
+    ],
+)
+def test_address_verification_rejects_wrong_parcel_address(input_address, official_address):
+    core = TaxGrieveCore(db_path=':memory:')
+
+    assert not core._addresses_match_for_verification(input_address, official_address)

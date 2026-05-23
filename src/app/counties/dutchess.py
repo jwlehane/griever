@@ -46,6 +46,10 @@ def _clean_street_parts(street_part: str):
     street_options = [clean_street, street_base]
     if street_no_dir != street_base:
         street_options.append(street_no_dir)
+    compact_source = street_no_dir if street_no_dir != street_base else street_base
+    compact = compact_source.replace(" ", "")
+    if len(compact_source.split()) > 1 and compact:
+        street_options.append(compact)
 
     seen = set()
     return predir, [x for x in street_options if x and not (x in seen or seen.add(x))]

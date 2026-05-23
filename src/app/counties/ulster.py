@@ -38,6 +38,7 @@ def _escape(value: str) -> str:
 
 def _street_options(street: str) -> list[str]:
     clean = re.sub(r"\s+", " ", (street or "").upper().strip())
+    clean = _collapse_duplicate_suffix(clean)
     options = [clean]
     for long, short in _SUFFIX_PAIRS:
         for suffix in (long, short):
@@ -48,6 +49,23 @@ def _street_options(street: str) -> list[str]:
                 break
     seen = set()
     return [opt for opt in options if opt and not (opt in seen or seen.add(opt))]
+
+
+def _collapse_duplicate_suffix(street: str) -> str:
+    tokens = street.split()
+    if len(tokens) < 2:
+        return street
+    canonical = {}
+    for long, short in _SUFFIX_PAIRS:
+        canonical[long] = short
+        canonical[short] = short
+    if canonical.get(tokens[-1]) and canonical.get(tokens[-1]) == canonical.get(tokens[-2]):
+        tokens.pop()
+    return " ".join(tokens)
+
+
+def _parse_number_street(head: str):
+    return re.match(r"^(\d+(?:-\d+)?)\s+(.+)$", head)
 
 
 def _county_identifier(attrs: dict) -> str:
@@ -78,7 +96,7 @@ class UlsterCounty(CountyInterface):
         raw = address_string.upper().strip()
         # Take only the street-part (before first comma) for the PARCEL_ADDR match.
         head = raw.split(",")[0].strip()
-        match_num = re.match(r"^(\d+)\s+(.+)$", head)
+        match_num = _parse_number_street(head)
         if not match_num:
             return None
         number, street = match_num.group(1), match_num.group(2).strip()
@@ -142,7 +160,7 @@ class UlsterCounty(CountyInterface):
     def suggest_addresses(self, address_string: str, limit: int = 8) -> list[dict]:
         raw = address_string.upper().strip()
         head = raw.split(",")[0].strip()
-        match_num = re.match(r"^(\d+)\s+(.+)$", head)
+        match_num = _parse_number_street(head)
         if not match_num:
             return []
         number, street = match_num.group(1), match_num.group(2).strip()
