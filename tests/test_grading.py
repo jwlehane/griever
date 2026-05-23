@@ -75,8 +75,35 @@ def test_grading_uses_same_rar_as_similarity_score():
     score = core.calculate_similarity(subject, comp, rar=44.03, valuation_date='2025-07-01')
     grade = core.calculate_similarity_grade(subject, comp, rar=44.03, valuation_date='2025-07-01')
 
-    assert score >= 50
-    assert grade == "C"
+    assert score >= 65
+    assert grade == "B"
+
+
+def test_date_and_missing_county_fields_are_neutral_not_failing():
+    core = TaxGrieveCore(db_path=':memory:')
+    subject = {
+        'sqft': 2413,
+        'year_built': 1973,
+        'bedrooms': 3,
+        'bathrooms': 2,
+        'assessment_2026': 448936,
+    }
+    comp = {
+        'sqft': 2257,
+        'bedrooms': 3,
+        'bathrooms': 2,
+        'year_built': 0,
+        'sale_price': 571000,
+        'sale_date': '2026-05-13',
+    }
+
+    breakdown = core.calculate_similarity_breakdown(subject, comp, rar=44.03, valuation_date='2025-07-01')
+
+    assert breakdown['date_points'] > 0
+    assert breakdown['days_from_valuation'] > 183
+    assert breakdown['style_era_points'] > 0
+    assert "Year-built data missing" in " ".join(breakdown['notes'])
+    assert breakdown['total_score'] >= 65
 
 
 def test_c_grade_starts_at_reviewable_threshold():
@@ -90,13 +117,13 @@ def test_c_grade_starts_at_reviewable_threshold():
         'assessment_2026': 741400,
     }
     comp = {
-        'sqft': 1536,
-        'year_built': 1940,
+        'sqft': 1450,
+        'year_built': 1900,
         'acreage': 0.5,
         'bedrooms': 3,
         'bathrooms': 1,
-        'sale_price': 285000,
-        'sale_date': '2026-03-20',
+        'sale_price': 400000,
+        'sale_date': '2026-06-15',
     }
 
     score = core.calculate_similarity(subject, comp, valuation_date='2025-07-01')
@@ -104,6 +131,36 @@ def test_c_grade_starts_at_reviewable_threshold():
 
     assert score >= core.MIN_DEFENSIBLE_SCORE
     assert grade == "C"
+
+
+def test_calculate_valuation_uses_municipal_rar_for_report_scores():
+    core = TaxGrieveCore(db_path=':memory:')
+    subject = {
+        'sbl': '51080005603400090260000000',
+        'sqft': 2413,
+        'year_built': 1973,
+        'bedrooms': 3,
+        'bathrooms': 2,
+        'assessment_2026': 448936,
+    }
+    comp = {
+        'address': '101 Florence St',
+        'sqft': 2257,
+        'bedrooms': 3,
+        'bathrooms': 2,
+        'year_built': 0,
+        'sale_price': 571000,
+        'sale_date': '2026-05-13',
+        'is_selected': 1,
+    }
+
+    result = core.calculate_valuation(subject, [comp], enforce_selection=True)
+    report_comp = result['comps'][0]
+    direct_score = core.calculate_similarity(subject, comp, rar=44.03, valuation_date='2025-07-01')
+
+    assert report_comp['match_breakdown']['rar'] == 44.03
+    assert report_comp['similarity_score'] == direct_score
+    assert report_comp['grade'] == 'B'
 
 
 def test_valuation_enforcement():

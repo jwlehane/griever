@@ -636,6 +636,12 @@ class TaxGrieveCore:
                         row = cursor.fetchone()
                         row_cols = [description[0] for description in cursor.description]
                         comp_obj = dict(zip(row_cols, row))
+                        comp_obj['similarity_score'] = self.calculate_similarity(
+                            subject, comp_obj, rar=rar, valuation_date=valuation_date
+                        )
+                        comp_obj['grade'] = self.calculate_similarity_grade(
+                            subject, comp_obj, rar=rar, valuation_date=valuation_date
+                        )
                         if not self.is_defensible_comp(comp_obj):
                             reason = self.quality_rejection_reason(comp_obj)
                             yield {"status": "resuming", "message": f"Skipped low-quality existing comp: {reason} ({comp_obj['address']})"}
@@ -923,9 +929,9 @@ class TaxGrieveCore:
             return original_year
         return int((original_year + renovation_year) / 2)
 
-    def calculate_similarity(self, subject, comp, renovation_year=None, rar=100.0, valuation_date=None):
+    def calculate_similarity_breakdown(self, subject, comp, renovation_year=None, rar=100.0, valuation_date=None):
         """
-        Calculates Total Score = (Similarity Index * 0.70) + (Advantage Index * 0.30)
+        Calculates Total Score = (Similarity Index * 0.70) + (Advantage Index * 0.30).
         Similarity Index (0-100): Date, GLA, Style/Era, Grade/Condition.
         Advantage Index (0-100): Based on price/sqft vs target EMV/sqft.
         """
@@ -936,25 +942,35 @@ class TaxGrieveCore:
         if isinstance(valuation_date, str):
             valuation_date = dt.datetime.strptime(valuation_date, '%Y-%m-%d').date()
 
-        # 1. Date (Max 25 pts)
-        date_pts = 0
+        # 1. Date (Max 25 pts). Hard filters allow sales within 12 months of
+        # the valuation date; do not zero out otherwise-valid 6-12 month sales.
+        date_pts = 10
+        days_diff = None
         sale_date_str = comp.get('sale_date')
         if sale_date_str:
             try:
                 s_date = dt.datetime.strptime(sale_date_str, '%Y-%m-%d').date()
                 days_diff = abs((s_date - valuation_date).days)
-                if days_diff <= 183:
-                    date_pts = max(0, 25 * (1 - (days_diff / 183)))
+                if days_diff <= 90:
+                    date_pts = 25
+                elif days_diff <= 183:
+                    date_pts = 25 - ((days_diff - 90) / 93) * 7
+                elif days_diff <= 365:
+                    date_pts = 18 - ((days_diff - 183) / 182) * 8
+                else:
+                    date_pts = 0
             except ValueError:
-                pass
+                date_pts = 10
         sim_points += date_pts
 
         # 2. GLA (Max 30 pts)
         gla_pts = 0
+        gla_var_pct = None
         subj_sqft = subject.get('sqft', 0)
         comp_sqft = comp.get('sqft', 0)
         if subj_sqft > 0 and comp_sqft > 0:
             var = abs(comp_sqft - subj_sqft) / subj_sqft
+            gla_var_pct = var * 100
             if var <= 0.05:
                 gla_pts = 30
             elif var <= 0.20:
@@ -962,17 +978,47 @@ class TaxGrieveCore:
                 gla_pts = max(0, 30 * (1 - ((var - 0.05) / 0.15)))
         sim_points += gla_pts
 
-        # 3. Style & Era (Max 25 pts)
+        # 3. Style & Era (Max 25 pts). County data is often incomplete; missing
+        # style/year gets neutral credit so absence of data is not treated as a
+        # confirmed mismatch.
         style_pts = 0
-        if subject.get('style') and comp.get('style') and subject.get('style') == comp.get('style'):
-            style_pts += 15
+        style_note = "style unavailable; neutral"
+        subj_style = (subject.get('style') or '').strip().lower()
+        comp_style = (comp.get('style') or '').strip().lower()
+        if subj_style and comp_style:
+            if subj_style == comp_style:
+                style_pts += 10
+                style_note = "style match"
+            else:
+                style_pts += 3
+                style_note = "style differs"
+        else:
+            style_pts += 6
         
         subj_year = subject.get('year_built', 0)
         if renovation_year:
             subj_year = self.calculate_effective_year_built(subj_year, renovation_year)
         comp_year = comp.get('year_built', 0)
-        if subj_year and comp_year and abs(subj_year - comp_year) <= 10:
-            style_pts += 10
+        age_gap = None
+        era_note = "year built unavailable; neutral"
+        if subj_year and comp_year:
+            age_gap = abs(subj_year - comp_year)
+            if age_gap <= 10:
+                style_pts += 15
+                era_note = "same era"
+            elif age_gap <= 25:
+                style_pts += 10
+                era_note = "nearby era"
+            elif age_gap <= 40:
+                style_pts += 6
+                era_note = "older/newer era"
+            elif age_gap <= 60:
+                style_pts += 3
+                era_note = "different era"
+            else:
+                era_note = "very different era"
+        else:
+            style_pts += 8
         sim_points += style_pts
 
         # 4. Grade/Condition (Max 20 pts)
@@ -1017,7 +1063,43 @@ class TaxGrieveCore:
             advantage_index = 50 # Default if data missing
 
         total_score = (similarity_index * 0.70) + (advantage_index * 0.30)
-        return round(total_score, 1)
+        notes = []
+        if days_diff is None:
+            notes.append("Sale date unavailable; neutral date credit used.")
+        elif days_diff > 183 and days_diff <= 365:
+            notes.append("Sale is inside the 12-month valuation window but not near the valuation date.")
+        if not (subj_style and comp_style):
+            notes.append("Style data missing; neutral style credit used.")
+        if not (subj_year and comp_year):
+            notes.append("Year-built data missing; neutral era credit used.")
+
+        return {
+            'date_points': round(date_pts, 1),
+            'date_max': 25,
+            'days_from_valuation': days_diff,
+            'gla_points': round(gla_pts, 1),
+            'gla_max': 30,
+            'gla_variance_pct': round(gla_var_pct, 1) if gla_var_pct is not None else None,
+            'style_era_points': round(style_pts, 1),
+            'style_era_max': 25,
+            'style_note': style_note,
+            'era_note': era_note,
+            'age_gap': age_gap,
+            'condition_points': round(cond_pts, 1),
+            'condition_max': 20,
+            'similarity_index': round(similarity_index, 1),
+            'advantage_index': round(advantage_index, 1),
+            'target_emv_ppsf': round(target_emv_sqft, 1) if target_emv_sqft else None,
+            'comp_ppsf': round(comp_price_sqft, 1) if comp_price_sqft else None,
+            'rar': rar,
+            'total_score': round(total_score, 1),
+            'notes': notes,
+        }
+
+    def calculate_similarity(self, subject, comp, renovation_year=None, rar=100.0, valuation_date=None):
+        return self.calculate_similarity_breakdown(
+            subject, comp, renovation_year=renovation_year, rar=rar, valuation_date=valuation_date
+        )['total_score']
 
     def calculate_similarity_grade(self, subject, comp, renovation_year=None, rar=100.0, valuation_date=None):
         """
@@ -1047,12 +1129,13 @@ class TaxGrieveCore:
         final_score = max(0, base_score - date_penalty)
         
         if final_score >= 85: return "A"
-        if final_score >= 70: return "B"
+        if final_score >= 65: return "B"
         if final_score >= self.MIN_DEFENSIBLE_SCORE: return "C"
         return "F"
 
     def calculate_valuation(self, subject, comps, adjs=None, renovation_year=None,
-                            best_n: int = 3, condition_factor: float = 1.0, enforce_selection=False):
+                            best_n: int = 3, condition_factor: float = 1.0,
+                            enforce_selection=False, rar=None):
         """Sales-comparison valuation with median+IQR outlier filter and a
         best-N selection. Returns a rich result dict (not just market_value)
         so callers can show defensible breakdowns.
@@ -1085,6 +1168,13 @@ class TaxGrieveCore:
         if renovation_year:
             subj_year = self.calculate_effective_year_built(subj_year, renovation_year)
         valuation_date = self.get_valuation_date(subject)
+        if rar is None:
+            try:
+                from app.orpts import OrptsClient
+                rates = OrptsClient().get_municipal_rates((subject.get('sbl') or '')[:6])
+                rar = rates.get('rar', 100.0)
+            except Exception:
+                rar = 100.0
 
         raw_results = []
         for comp in comps:
@@ -1135,14 +1225,19 @@ class TaxGrieveCore:
                 # Safety floor at 10% of sale price.
                 reconciled = max(reconciled, adj_price * 0.1)
 
-                score = self.calculate_similarity(
-                    subject, comp, renovation_year=renovation_year, valuation_date=valuation_date
+                breakdown = self.calculate_similarity_breakdown(
+                    subject, comp, renovation_year=renovation_year, rar=rar, valuation_date=valuation_date
+                )
+                score = breakdown['total_score']
+                grade = self.calculate_similarity_grade(
+                    subject, comp, renovation_year=renovation_year, rar=rar, valuation_date=valuation_date
                 )
 
                 raw_results.append({
                     'address': comp['address'], 'sale_price': comp['sale_price'],
                     'reconciled_value': reconciled, 'similarity_score': score,
-                    'grade': comp.get('grade', 'C'),
+                    'grade': grade,
+                    'match_breakdown': breakdown,
                     'is_selected': comp.get('is_selected', 0),
                     'adjustments': {
                         'gla': gla_adj, 'acreage': acre_adj, 'bath': bath_adj,

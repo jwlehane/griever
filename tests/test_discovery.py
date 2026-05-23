@@ -211,7 +211,7 @@ def test_forced_verification_tries_city_context_then_validated_broad_fallback(tm
     verified = [event['comp'] for event in events if event.get('status') == 'verified']
     assert len(verified) == 1
     assert verified[0]['address'] == '94 Hilltop Rd'
-    assert verified[0]['grade'] == 'C'
+    assert verified[0]['grade'] == 'B'
     county.search_address.assert_has_calls([
         call('94 Hill Top Rd, Rhinebeck, NY 12572'),
         call('94 Hill Top Rd'),

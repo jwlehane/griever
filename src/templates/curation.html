@@ -48,6 +48,7 @@
         .grade-B { background: #e3f2fd; color: #1565c0; }
         .grade-C { background: #fff3e0; color: #ef6c00; }
         .grade-F { background: #ffebee; color: #c62828; }
+        .grade-label { display: block; margin-top: 3px; color: var(--muted); }
         
         .table-wrap {
             width: 100%;
@@ -102,6 +103,10 @@
         .manual-fields input:nth-child(2) { flex: 0 1 200px; }
         .math-panel { display: none; background: #fff; padding: 8px; border: 1px solid var(--border); margin-top: 5px; border-radius: 4px; min-width: 180px; }
         .math-line { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #f1f1f1; padding: 3px 0; }
+        .score-detail { margin-top: 6px; max-width: 190px; }
+        .score-detail summary { color: var(--accent); cursor: pointer; font-size: 12px; }
+        .score-grid { display: grid; gap: 4px; margin-top: 6px; color: var(--muted); font-size: 11px; }
+        .score-note { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.35; }
         
         /* Modal */
         .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
@@ -145,7 +150,7 @@
         <details class="explainer">
             <summary>How Curation & Grading Works</summary>
             <p>Review the discovered properties below. NYS requires sales to be <b>Arms-Length</b> and similar in size, age, and location. Select at least 3 defensible comps to finalize your valuation.</p>
-            <p><b>Match (%):</b> The algorithm grades each property (A, B, C, F) based on how similar its specs (Sqft, Age, Acreage) are to the subject, penalizing sales that are further away or sold outside the ideal 12-month window.</p>
+            <p><b>Match (%):</b> The algorithm grades each property (A, B, C, F) using valuation-date proximity, living area, style/era, condition, and price-per-square-foot advantage. Missing county fields are treated neutrally and shown in the score details.</p>
             <p><b>Adjusted Value:</b> This is the estimated value of your property <i>if</i> the comp's price was adjusted for the differences in square footage, age, and condition. You can tweak your property's <b>Condition</b> at the bottom to see how it dynamically affects these values.</p>
         </details>
         
@@ -212,9 +217,31 @@
             <tbody>
                 {% for comp in comps %}
                 <tr id="row-{{ loop.index }}" data-outlier="{{ 'true' if comp.is_outlier else 'false' }}" data-score="{{ comp.similarity_score }}">
-                    <td data-label="Match" title="Grade is based on similarity score (Sqft 40%, Age 30%, Acreage 20%, Distance 10%) with a penalty for sales older than 12 months.">
+                    <td data-label="Match" title="Grade combines match quality and price-per-square-foot advantage against the subject's assessed market value.">
                         <span class="grade grade-{{ comp.grade }}">{{ comp.grade }}</span><br>
+                        <small class="grade-label">
+                            {% if comp.grade == 'A' %}Strong match{% elif comp.grade == 'B' %}Good match{% elif comp.grade == 'C' %}Reviewable comp{% else %}Weak match{% endif %}
+                        </small>
                         <small>{{ "%.1f"|format(comp.similarity_score) }}%</small>
+                        {% if comp.match_breakdown %}
+                        {% set b = comp.match_breakdown %}
+                        <details class="score-detail">
+                            <summary>Score details</summary>
+                            <div class="score-grid">
+                                <span>Date {{ b.date_points }}/{{ b.date_max }}{% if b.days_from_valuation is not none %} ({{ b.days_from_valuation }} days){% endif %}</span>
+                                <span>Size {{ b.gla_points }}/{{ b.gla_max }}{% if b.gla_variance_pct is not none %} ({{ b.gla_variance_pct }}% var){% endif %}</span>
+                                <span>Style/era {{ b.style_era_points }}/{{ b.style_era_max }}</span>
+                                <span>Condition {{ b.condition_points }}/{{ b.condition_max }}</span>
+                                <span>Value advantage {{ b.advantage_index }}/100</span>
+                                {% if b.comp_ppsf and b.target_emv_ppsf %}
+                                <span>PPSF ${{ b.comp_ppsf }} vs target ${{ b.target_emv_ppsf }}</span>
+                                {% endif %}
+                            </div>
+                            {% if b.notes %}
+                            <div class="score-note">{{ b.notes|join(' ') }}</div>
+                            {% endif %}
+                        </details>
+                        {% endif %}
                     </td>
                     <td data-label="Address"><b>{{ comp.address }}</b><br><small>{{ comp.distance_miles }} miles away</small></td>
                     <td data-label="Sale">${{ "{:,.0f}".format(comp.sale_price) }}<br><small>{{ comp.sale_date }}</small></td>

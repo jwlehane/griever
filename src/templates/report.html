@@ -54,6 +54,7 @@
         .badge-used    { background: #d5f5e0; color: #145a32; }
         .badge-outlier { background: #fadbd8; color: #922b21; }
         .badge-unused  { background: #ecf0f1; color: var(--muted); }
+        .grade-label { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
         .narrative { background: #fffde7; padding: 18px; border-radius: 6px; font-style: italic; border: 1px solid #ffe57f; }
         .alert-box { padding: 14px 18px; border-radius: 6px; margin-bottom: 20px; }
         .alert-good { background: #d5f5e0; border: 1px solid #82d59a; color: #145a32; }
@@ -65,6 +66,8 @@
         .btn-row { display: flex; gap: 10px; margin: 16px 0; flex-wrap: wrap; }
         .disclaimer { font-size: 11px; color: var(--muted); border-top: 1px solid #ecf0f1; margin-top: 40px; padding-top: 16px; line-height: 1.5; }
         .spec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; font-size: 13px; }
+        .score-grid { display: grid; gap: 4px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+        .score-note { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.35; }
         .er-line { font-size: 13px; color: var(--muted); }
         details summary { cursor: pointer; color: var(--accent); font-size: 13px; padding: 6px 0; }
         details[open] summary { color: var(--text); font-weight: 600; }
@@ -246,7 +249,24 @@
                 </td>
                 <td>
                     <div style="font-weight: bold; font-size: 16px;">Grade: {{ comp.grade }}</div>
+                    <span class="grade-label">{% if comp.grade == 'A' %}Strong match{% elif comp.grade == 'B' %}Good match{% elif comp.grade == 'C' %}Reviewable comp{% else %}Weak match{% endif %}</span>
                     <small>Score: {{ comp.similarity_score }}%</small>
+                    {% if comp.match_breakdown %}
+                    {% set b = comp.match_breakdown %}
+                    <div class="score-grid">
+                        <span>Date {{ b.date_points }}/{{ b.date_max }}{% if b.days_from_valuation is not none %} ({{ b.days_from_valuation }} days){% endif %}</span>
+                        <span>Size {{ b.gla_points }}/{{ b.gla_max }}{% if b.gla_variance_pct is not none %} ({{ b.gla_variance_pct }}% var){% endif %}</span>
+                        <span>Style/era {{ b.style_era_points }}/{{ b.style_era_max }}</span>
+                        <span>Condition {{ b.condition_points }}/{{ b.condition_max }}</span>
+                        <span>Value advantage {{ b.advantage_index }}/100</span>
+                        {% if b.comp_ppsf and b.target_emv_ppsf %}
+                        <span>PPSF ${{ b.comp_ppsf }} vs target ${{ b.target_emv_ppsf }}</span>
+                        {% endif %}
+                    </div>
+                    {% if b.notes %}
+                    <div class="score-note">{{ b.notes|join(' ') }}</div>
+                    {% endif %}
+                    {% endif %}
                 </td>
                 <td>${{ "{:,.0f}".format(comp.sale_price) }}</td>
                 <td><strong>${{ "{:,.0f}".format(comp.reconciled_value) }}</strong></td>
