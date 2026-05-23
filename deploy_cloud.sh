@@ -1,16 +1,35 @@
 #!/bin/bash
 # deploy_cloud.sh
 
-if [ -z "$RAPIDAPI_KEY" ]; then
-    echo "Error: RAPIDAPI_KEY not found in environment."
-    echo "Please run: export RAPIDAPI_KEY=your_key"
-    exit 1
-fi
+PROJECT_ID="${PROJECT_ID:-double-zenith-89117}"
+REGION="${REGION:-us-east5}"
+SERVICE="${SERVICE:-tax-grieve-app}"
+RAPIDAPI_SECRET_NAME="${RAPIDAPI_SECRET_NAME:-tax-grieve-app-rapidapi-key}"
 
 echo "Cleaning up local locks..."
 rm -f .git/index.lock
 
-echo "Deploying to Cloud Run (us-east5) with extended timeout..."
+if ! gcloud secrets describe "$RAPIDAPI_SECRET_NAME" --project "$PROJECT_ID" >/dev/null 2>&1; then
+    if [ -z "$RAPIDAPI_KEY" ]; then
+        echo "Error: Secret $RAPIDAPI_SECRET_NAME does not exist and RAPIDAPI_KEY is not set."
+        echo "Create the secret first, or run: export RAPIDAPI_KEY=your_key"
+        exit 1
+    fi
+    printf "%s" "$RAPIDAPI_KEY" | gcloud secrets create "$RAPIDAPI_SECRET_NAME" \
+        --project "$PROJECT_ID" \
+        --replication-policy=automatic \
+        --data-file=-
+fi
 
-# Using us-east5 as requested and adding --timeout to allow more time for the build/startup
-gcloud run deploy tax-grieve-app --source . --project double-zenith-89117 --region us-east5 --allow-unauthenticated --timeout 600 --set-env-vars "RAPIDAPI_KEY=$RAPIDAPI_KEY"
+echo "Deploying $SERVICE to Cloud Run ($REGION) with Secret Manager..."
+
+# The runtime service account must have roles/secretmanager.secretAccessor for
+# this secret. Cloud Run keeps the key out of revision env literals.
+gcloud run deploy "$SERVICE" \
+    --source . \
+    --project "$PROJECT_ID" \
+    --region "$REGION" \
+    --allow-unauthenticated \
+    --timeout 600 \
+    --remove-env-vars RAPIDAPI_KEY \
+    --set-secrets "RAPIDAPI_KEY=$RAPIDAPI_SECRET_NAME:latest"

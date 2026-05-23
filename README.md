@@ -60,11 +60,28 @@ The project includes a `deploy_cloud.sh` script for rapid deployment to Google C
 Run the deployment script from your local machine:
 
 ```bash
+./deploy_cloud.sh
+```
+
+The script reads `RAPIDAPI_KEY` from Google Secret Manager, using
+`tax-grieve-app-rapidapi-key` by default. If the secret does not exist yet,
+export `RAPIDAPI_KEY` once and the script will create it without storing the
+key as a Cloud Run literal environment variable.
+
+```bash
 export RAPIDAPI_KEY=your_key_here
 ./deploy_cloud.sh
 ```
 
-**Note:** The script defaults to the `us-east5` region and project `double-zenith-89117`. Edit `deploy_cloud.sh` to change these targets.
+The Cloud Run runtime service account must be able to read the secret:
+
+```bash
+gcloud projects add-iam-policy-binding double-zenith-89117 \
+  --member serviceAccount:529334528547-compute@developer.gserviceaccount.com \
+  --role roles/secretmanager.secretAccessor
+```
+
+**Note:** The script defaults to the `us-east5` region and project `double-zenith-89117`. Override `PROJECT_ID`, `REGION`, `SERVICE`, or `RAPIDAPI_SECRET_NAME` to change these targets.
 
 ---
 
