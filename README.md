@@ -38,6 +38,9 @@ SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your_email@gmail.com
 SMTP_PASSWORD=your_app_password
+
+# Optional: PostgreSQL Database URL (falls back to SQLite if omitted)
+DATABASE_URL=postgresql://user:password@host/database
 ```
 
 ### 4. Run the Application
@@ -50,21 +53,28 @@ Open your browser to `http://localhost:8080`.
 
 ## ☁️ Cloud Deployment (Google Cloud Run)
 
-The project includes a `deploy_cloud.sh` script for rapid deployment to Google Cloud Run.
+The project includes scripts to deploy to Google Cloud Run and set up a persistent database.
 
 ### 1. Prerequisites
 - [Google Cloud SDK (gcloud)](https://cloud.google.com/sdk/docs/install) installed and authenticated.
 - A GCP project with Billing enabled.
 
 ### 2. Deploy
-Run the deployment script from your local machine:
+Run the deployment script from your local machine to deploy to `us-east1`:
 
 ```bash
 export RAPIDAPI_KEY=your_key_here
 ./deploy_cloud.sh
 ```
 
-**Note:** The script defaults to the `us-east5` region and project `double-zenith-89117`. Edit `deploy_cloud.sh` to change these targets.
+### 3. Persistent Database Setup (Cloud SQL)
+Since Cloud Run is stateless, you should hook it up to a persistent PostgreSQL instance. Run the provisioning script to create a Cloud SQL database and link it to the service automatically:
+
+```bash
+./provision_db.sh
+```
+
+**Note:** The scripts default to the `us-east1` region, project `double-zenith-89117`, and service name `nygriever`. Edit `deploy_cloud.sh` and `provision_db.sh` to change these targets.
 
 ---
 
@@ -88,7 +98,8 @@ The system is designed to be multi-county. All county-specific logic is isolated
 - To add a new county (e.g., Ulster), implement the `CountyInterface` in a new file (e.g., `ulster.py`) and update the `CountyFactory`.
 
 ### Database
-- **SQLite:** Uses `grievance_data.db` for normalized storage.
+- **SQLite (Local):** Uses `grievance_data.db` for local normalized storage.
+- **PostgreSQL (Cloud):** Activated automatically if `DATABASE_URL` is defined in the environment. Recommended for Cloud Run deployments.
 - **Persistence:** Discovery results are written to the database immediately to allow for session resumption and "repairing" of incomplete data.
 
 ---

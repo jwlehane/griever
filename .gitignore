@@ -28,3 +28,5 @@ reports/
 # OS
 .DS_Store
 Thumbs.db
+server_log.txt
+

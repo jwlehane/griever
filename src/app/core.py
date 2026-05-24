@@ -575,7 +575,7 @@ class TaxGrieveCore:
         finally:
             conn.close()
 
-    def _passes_hard_filters(self, subject, comp, valuation_date="2024-07-01"):
+    def _passes_hard_filters(self, subject, comp, valuation_date="2025-07-01"):
         """
         Enforce strict exclusion rules. Returns (True, "") or (False, "reason").
         """

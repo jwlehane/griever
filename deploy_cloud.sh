@@ -10,7 +10,8 @@ fi
 echo "Cleaning up local locks..."
 rm -f .git/index.lock
 
-echo "Deploying to Cloud Run (us-east5) with extended timeout..."
+echo "Deploying to Cloud Run (us-east1) with extended timeout..."
 
-# Using us-east5 as requested and adding --timeout to allow more time for the build/startup
-gcloud run deploy tax-grieve-app --source . --project double-zenith-89117 --region us-east5 --allow-unauthenticated --timeout 600 --set-env-vars "RAPIDAPI_KEY=$RAPIDAPI_KEY"
+# Using us-east1 and service name nygriever
+gcloud run deploy nygriever --source . --project double-zenith-89117 --region us-east1 --allow-unauthenticated --timeout 600 --set-env-vars "RAPIDAPI_KEY=$RAPIDAPI_KEY"
+
