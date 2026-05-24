@@ -18,11 +18,25 @@ import sqlite3
 import re
 from pathlib import Path
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if DATABASE_URL:
+# Always import psycopg2 if installed; we gate actual use on DATABASE_URL at
+# call time (not import time) so Cloud Run secret injection is never missed.
+try:
     import psycopg2
     import psycopg2.extras
+    _PSYCOPG2_AVAILABLE = True
+except ImportError:
+    _PSYCOPG2_AVAILABLE = False
+
+
+def _database_url() -> str | None:
+    """Read DATABASE_URL fresh from the environment each time.
+
+    Do NOT cache at module level: Cloud Run injects secrets before the process
+    starts, but keeping a module-level snapshot means any code that imports
+    db.py during a test (or before the real app init) could freeze the value
+    as None even though the env var is present for the actual server process.
+    """
+    return os.getenv("DATABASE_URL")
 
 
 _SCHEMA_DIR = Path(__file__).parent
@@ -31,8 +45,9 @@ _SCHEMA_DIR = Path(__file__).parent
 def get_connection(sqlite_path: str = 'grievance_data.db'):
     """Return a connection. Postgres if DATABASE_URL is set (sqlite_path is
     ignored in that case), otherwise SQLite at `sqlite_path`."""
-    if DATABASE_URL:
-        return PostgresConnection(psycopg2.connect(DATABASE_URL))
+    db_url = _database_url()
+    if db_url:
+        return PostgresConnection(psycopg2.connect(db_url))
     conn = sqlite3.connect(sqlite_path)
     conn.row_factory = sqlite3.Row
     return SQLiteConnection(conn)
@@ -44,11 +59,12 @@ def init_schema(sqlite_path: str = 'grievance_data.db'):
     Call once at startup. Both schema files use CREATE TABLE IF NOT EXISTS,
     so this is safe to run on every boot.
     """
-    schema_file = "schema_postgres.sql" if DATABASE_URL else "schema_sqlite.sql"
+    db_url = _database_url()
+    schema_file = "schema_postgres.sql" if db_url else "schema_sqlite.sql"
     sql = (_SCHEMA_DIR / schema_file).read_text()
 
-    if DATABASE_URL:
-        conn = psycopg2.connect(DATABASE_URL)
+    if db_url:
+        conn = psycopg2.connect(db_url)
         try:
             with conn.cursor() as cur:
                 cur.execute(sql)
@@ -67,7 +83,7 @@ def init_schema(sqlite_path: str = 'grievance_data.db'):
 def is_postgres() -> bool:
     """Lets call sites pick driver-specific syntax (UPSERT, table-exists)
     without re-reading the env var."""
-    return bool(DATABASE_URL)
+    return bool(_database_url())
 
 
 def upsert_sql(table: str, columns: list[str], conflict_cols: list[str]) -> str:
