@@ -412,7 +412,7 @@ class TaxGrieveCore:
                          subject_data.get('property_class')))
             row_id = cursor.lastrowid
         else:
-            row_id = row[0]
+            row_id = row['id']
             cursor.execute('''UPDATE properties SET
                                 sqft = MAX(sqft, ?),
                                 bedrooms = MAX(bedrooms, ?),
@@ -650,15 +650,14 @@ class TaxGrieveCore:
                 existing = cursor.fetchone()
                 if existing:
                     # REPAIR LOGIC: If existing record is missing assessment data, force a re-verify
-                    if existing[0] != 'REJECTED' and (existing[2] is None or existing[2] == 0):
-                        yield {"status": "info", "message": f"Repairing missing data for: {existing[1]}"}
+                    if existing['status'] != 'REJECTED' and (existing['assessment_2026'] is None or existing['assessment_2026'] == 0):
+                        yield {"status": "info", "message": f"Repairing missing data for: {existing['address']}"}
                         # Proceed to verification logic below instead of continuing
-                    elif existing[0] != 'REJECTED':
+                    elif existing['status'] != 'REJECTED':
                         # Fetch full existing data to return to live stream
                         cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND zpid = ?", (subject_id, zpid))
                         row = cursor.fetchone()
-                        row_cols = [description[0] for description in cursor.description]
-                        comp_obj = dict(zip(row_cols, row))
+                        comp_obj = dict(row)
                         comp_obj['similarity_score'] = self.calculate_similarity(
                             subject, comp_obj, rar=rar, valuation_date=valuation_date
                         )
@@ -673,7 +672,7 @@ class TaxGrieveCore:
                         yield {"status": "verified", "comp": comp_obj, "message": f"Resumed: {comp_obj['address']}"}
                         continue
                     else:
-                        yield {"status": "resuming", "message": f"Skipping rejected: {existing[1]}"}
+                        yield {"status": "resuming", "message": f"Skipping rejected: {existing['address']}"}
                         continue
 
                 status_market = rc.get('homeStatus', rc.get('status', '')).upper()

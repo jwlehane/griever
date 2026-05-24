@@ -486,7 +486,7 @@ async def add_comp(request: Request, property_id: int = Form(...), address: str 
         cursor.execute("SELECT address FROM properties WHERE id = ?", (property_id,))
         row = cursor.fetchone()
         conn.close()
-        subject_addr = row[0] if row else ""
+        subject_addr = row['address'] if row else ""
         return HTMLResponse(f"""
             <div style="font-family:sans-serif; text-align:center; padding:50px;">
                 <h2>Comp Added!</h2>
