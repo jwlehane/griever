@@ -60,21 +60,40 @@ The project includes scripts to deploy to Google Cloud Run and set up a persiste
 - A GCP project with Billing enabled.
 
 ### 2. Deploy
-Run the deployment script from your local machine to deploy to `us-east1`:
+Run the deployment script from your local machine to deploy to `us-east1` (defaults to staging):
+
+```bash
+./deploy_cloud.sh staging
+# or for production:
+./deploy_cloud.sh prod
+```
+
+The script reads `RAPIDAPI_KEY` from Google Secret Manager, using `nygriever-rapidapi-key` by default. If the secret does not exist yet, export `RAPIDAPI_KEY` once and the script will create it:
 
 ```bash
 export RAPIDAPI_KEY=your_key_here
-./deploy_cloud.sh
+./deploy_cloud.sh staging
+```
+
+The Cloud Run runtime service account must be able to read the secret. A project Owner or Secret Manager Admin should grant access to the specific secret:
+
+```bash
+gcloud secrets add-iam-policy-binding nygriever-rapidapi-key \
+  --project double-zenith-89117 \
+  --member serviceAccount:529334528547-compute@developer.gserviceaccount.com \
+  --role roles/secretmanager.secretAccessor
 ```
 
 ### 3. Persistent Database Setup (Cloud SQL)
-Since Cloud Run is stateless, you should hook it up to a persistent PostgreSQL instance. Run the provisioning script to create a Cloud SQL database and link it to the service automatically:
+Since Cloud Run is stateless, hook it up to a persistent PostgreSQL instance. Run the provisioning script to create/link the database for the environment:
 
 ```bash
-./provision_db.sh
+./provision_db.sh staging
+# or for production:
+./provision_db.sh prod
 ```
 
-**Note:** The scripts default to the `us-east1` region, project `double-zenith-89117`, and service name `nygriever`. Edit `deploy_cloud.sh` and `provision_db.sh` to change these targets.
+**Note:** The scripts default to the `us-east1` region, project `double-zenith-89117`, and target `nygriever-staging` or `nygriever` depending on the environment parameter.
 
 ---
 

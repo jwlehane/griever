@@ -2,8 +2,10 @@ import re
 import requests
 from app.counties.base import CountyInterface
 from app.exceptions import CountyAPIError
+from app.logging_safe import safe_addr
 
 NYS_PARCELS_URL = "https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/MapServer/1/query"
+ULSTER_PARCELS_URL = "https://gis.ulstercountyny.gov/server/rest/services/Parcel_Viewer/Tax_Parcel_Data/MapServer/0/query"
 
 ULSTER_SWIS_MAP = {
     "510800": "Kingston",   "512000": "Denning",     "512200": "Esopus",
@@ -16,10 +18,58 @@ ULSTER_SWIS_MAP = {
     "515601": "Wawarsing",  "515689": "Wawarsing",   "515800": "Woodstock",
 }
 
+_SUFFIX_PAIRS = [
+    ("STREET", "ST"),
+    ("ROAD", "RD"),
+    ("AVENUE", "AVE"),
+    ("DRIVE", "DR"),
+    ("LANE", "LN"),
+    ("COURT", "CT"),
+    ("PLACE", "PL"),
+    ("TURNPIKE", "TPKE"),
+    ("BOULEVARD", "BLVD"),
+]
+
 
 def _escape(value: str) -> str:
     """Escape single quotes for ArcGIS WHERE clauses."""
     return value.replace("'", "''")
+
+
+def _street_options(street: str) -> list[str]:
+    clean = re.sub(r"\s+", " ", (street or "").upper().strip())
+    clean = _collapse_duplicate_suffix(clean)
+    options = [clean]
+    for long, short in _SUFFIX_PAIRS:
+        for suffix in (long, short):
+            token = f" {suffix}"
+            if clean.endswith(token):
+                base = clean[: -len(token)].strip()
+                options.extend([f"{base} {short}", f"{base} {long}", base])
+                break
+    seen = set()
+    return [opt for opt in options if opt and not (opt in seen or seen.add(opt))]
+
+
+def _collapse_duplicate_suffix(street: str) -> str:
+    tokens = street.split()
+    if len(tokens) < 2:
+        return street
+    canonical = {}
+    for long, short in _SUFFIX_PAIRS:
+        canonical[long] = short
+        canonical[short] = short
+    if canonical.get(tokens[-1]) and canonical.get(tokens[-1]) == canonical.get(tokens[-2]):
+        tokens.pop()
+    return " ".join(tokens)
+
+
+def _parse_number_street(head: str):
+    return re.match(r"^(\d+(?:-\d+)?)\s+(.+)$", head)
+
+
+def _county_identifier(attrs: dict) -> str:
+    return (attrs.get("RPS_Link") or "").strip()
 
 
 class UlsterCounty(CountyInterface):
@@ -46,7 +96,7 @@ class UlsterCounty(CountyInterface):
         raw = address_string.upper().strip()
         # Take only the street-part (before first comma) for the PARCEL_ADDR match.
         head = raw.split(",")[0].strip()
-        match_num = re.match(r"^(\d+)\s+(.+)$", head)
+        match_num = _parse_number_street(head)
         if not match_num:
             return None
         number, street = match_num.group(1), match_num.group(2).strip()
@@ -60,51 +110,115 @@ class UlsterCounty(CountyInterface):
                     town_hint = known
                     break
 
-        # NYS PARCEL_ADDR concatenates "<number> <street>" — single field LIKE
-        # against this is more robust than splitting LOC_ST_NBR + LOC_STREET.
-        addr_prefix = f"{number} {street}".replace("'", "''")
-        where_parts = [
-            "COUNTY_NAME='Ulster'",
-            f"UPPER(PARCEL_ADDR) LIKE '{addr_prefix}%'",
-        ]
-        if town_hint:
-            where_parts.append(f"UPPER(CITYTOWN_NAME)='{_escape(town_hint.upper())}'")
+        feats = []
+        for street_opt in _street_options(street):
+            # Ulster's county parcel service responds much faster than the
+            # statewide service and exposes RPS_Link as the full SWIS+SBL ID.
+            addr_prefix = f"{number} {street_opt}".replace("'", "''")
+            where_parts = [
+                f"PARCEL_ADDRESS LIKE '{addr_prefix.title()}%'",
+            ]
+            if town_hint:
+                where_parts.append(f"PARCEL_CITY='{_escape(town_hint)}'")
+            if preferred_swis:
+                where_parts.append(f"SWIS_CODE='{_escape(preferred_swis)}'")
 
-        params = {
-            "where": " AND ".join(where_parts),
-            "outFields": "PARCEL_ADDR,SWIS,SBL,CITYTOWN_NAME,MUNI_NAME",
-            "returnGeometry": "false",
-            "resultRecordCount": 1,
-            "f": "json",
-        }
-        try:
-            resp = self.session.get(NYS_PARCELS_URL, params=params, timeout=self.timeout)
-            resp.raise_for_status()
-            feats = resp.json().get("features", []) or []
-        except requests.RequestException as e:
-            raise CountyAPIError(
-                "NYS Tax Parcels service is unreachable. Try again in a minute."
-            ) from e
+            params = {
+                "where": " AND ".join(where_parts),
+                "outFields": "PARCEL_ADDRESS,PARCEL_CITY,SWIS_CODE,PRINTKEY,RPS_Link",
+                "returnGeometry": "false",
+                "resultRecordCount": 1,
+                "f": "json",
+            }
+            try:
+                resp = self.session.get(ULSTER_PARCELS_URL, params=params, timeout=min(self.timeout, 8))
+                resp.raise_for_status()
+                feats = resp.json().get("features", []) or []
+                if feats:
+                    break
+            except requests.RequestException as e:
+                raise CountyAPIError(
+                    "Ulster County parcel service is unreachable. Try again in a minute."
+                ) from e
 
         if not feats:
-            print(f"  Ulster NOT FOUND for {number} {street}")
+            print(f"  Ulster NOT FOUND for {safe_addr(f'{number} {street}')}")
             return None
 
         attrs = feats[0]["attributes"]
-        swis = attrs.get("SWIS", "")
-        sbl = attrs.get("SBL", "")
-        identifier = f"{swis}{sbl}"
-        print(f"  Ulster FOUND {attrs.get('PARCEL_ADDR')} in {attrs.get('CITYTOWN_NAME')}")
+        swis = attrs.get("SWIS_CODE", "")
+        identifier = _county_identifier(attrs)
+        print(f"  Ulster FOUND {safe_addr(attrs.get('PARCEL_ADDRESS'))} in {attrs.get('PARCEL_CITY')}")
         return {
             "parcelgrid": identifier,
             "swis": swis,
-            "sbl": sbl,
-            "address": attrs.get("PARCEL_ADDR"),
-            "town": attrs.get("CITYTOWN_NAME"),
+            "sbl": identifier,
+            "address": attrs.get("PARCEL_ADDRESS"),
+            "town": attrs.get("PARCEL_CITY"),
         }
 
+    def suggest_addresses(self, address_string: str, limit: int = 8) -> list[dict]:
+        raw = address_string.upper().strip()
+        head = raw.split(",")[0].strip()
+        match_num = _parse_number_street(head)
+        if not match_num:
+            return []
+        number, street = match_num.group(1), match_num.group(2).strip()
+
+        town_hint = None
+        parts = [p.strip() for p in raw.split(",")]
+        if len(parts) >= 2:
+            for known in self.swis_map.values():
+                if known.upper() in parts[1]:
+                    town_hint = known
+                    break
+
+        suggestions = []
+        seen = set()
+        for street_opt in _street_options(street):
+            addr_prefix = f"{number} {street_opt}".replace("'", "''")
+            where_parts = [
+                f"PARCEL_ADDRESS LIKE '{addr_prefix.title()}%'",
+            ]
+            if town_hint:
+                where_parts.append(f"PARCEL_CITY='{_escape(town_hint)}'")
+            params = {
+                "where": " AND ".join(where_parts),
+                "outFields": "PARCEL_ADDRESS,PARCEL_CITY,SWIS_CODE,PRINTKEY,RPS_Link",
+                "returnGeometry": "false",
+                "resultRecordCount": limit,
+                "f": "json",
+            }
+            resp = self.session.get(ULSTER_PARCELS_URL, params=params, timeout=min(self.timeout, 8))
+            resp.raise_for_status()
+            feats = resp.json().get("features", []) or []
+            for feat in feats:
+                attrs = feat.get("attributes", {}) or {}
+                swis = attrs.get("SWIS_CODE", "")
+                identifier = _county_identifier(attrs)
+                if not identifier or identifier in seen:
+                    continue
+                seen.add(identifier)
+                suggestions.append({
+                    "address": (attrs.get("PARCEL_ADDRESS") or "").title(),
+                    "town": attrs.get("PARCEL_CITY") or self.get_town_from_identifier(identifier),
+                    "county": "Ulster",
+                    "parcelgrid": identifier,
+                    "sbl": identifier,
+                    "swis": swis,
+                })
+                if len(suggestions) >= limit:
+                    return suggestions
+        return suggestions
+
     def get_full_rps_data(self, identifier: str) -> dict:
-        # identifier is SWIS(6) + SBL. SBL field in NYS service holds the SBL portion.
+        county_profile = self._get_county_parcel_profile(identifier)
+        if county_profile:
+            return county_profile
+
+        # Fallback for older identifiers that are only present in the statewide
+        # service. The county service is preferred because the statewide
+        # endpoint is often slow enough to break the user-facing flow.
         swis = identifier[:6]
         sbl = identifier[6:]
         where = f"COUNTY_NAME='Ulster' AND SWIS='{_escape(swis)}' AND SBL='{_escape(sbl)}'"
@@ -144,6 +258,37 @@ class UlsterCounty(CountyInterface):
             }
         except requests.RequestException as e:
             raise CountyAPIError(f"Ulster RPS fetch failed for {identifier}: {e}")
+
+    def _get_county_parcel_profile(self, identifier: str) -> dict:
+        params = {
+            "where": f"RPS_Link='{_escape(identifier)}'",
+            "outFields": "PARCEL_ADDRESS,PARCEL_CITY,SWIS_CODE,PRINTKEY,RPS_Link,ACRES,PROP_CLASS,PROP_CLASS_CODE",
+            "returnGeometry": "false",
+            "resultRecordCount": 1,
+            "f": "json",
+        }
+        try:
+            resp = self.session.get(ULSTER_PARCELS_URL, params=params, timeout=min(self.timeout, 8))
+            resp.raise_for_status()
+            feats = resp.json().get("features", []) or []
+            if not feats:
+                return None
+            a = feats[0]["attributes"]
+            prop_class = (a.get("PROP_CLASS_CODE") or a.get("PROP_CLASS") or "").strip()
+            return {
+                "address": (a.get("PARCEL_ADDRESS") or "").title(),
+                "sbl": identifier,
+                "sqft": 0.0,
+                "acreage": float(a.get("ACRES") or 0),
+                "bedrooms": 0,
+                "bathrooms": 0.0,
+                "year_built": 0,
+                "assessment_2026": 0.0,
+                "assessment_2025": 0.0,
+                "property_class": prop_class,
+            }
+        except requests.RequestException as e:
+            raise CountyAPIError(f"Ulster parcel fetch failed for {identifier}: {e}")
 
     def get_town_from_identifier(self, identifier: str) -> str:
         swis = identifier[:6]

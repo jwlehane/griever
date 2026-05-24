@@ -3,9 +3,12 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from app.core import TaxGrieveCore
-from app.utils import send_error_report
+from app.utils import send_error_report, init_sentry
 from app.counties.factory import CountyFactory
-from app.db import get_connection
+from app.counties.dutchess import DutchessCounty
+from app.counties.ulster import UlsterCounty
+from app.db import get_connection, init_schema
+from app.tos_gate import COOKIE_NAME as TOS_COOKIE, TTL_SECONDS as TOS_TTL, make_cookie as make_tos_cookie, require_tos_accepted
 import traceback
 import json
 import re
@@ -14,6 +17,9 @@ from fastapi.responses import StreamingResponse
 import asyncio
 import os
 from dotenv import load_dotenv
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 NYS_PARCELS_URL = "https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/MapServer/1/query"
 CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
@@ -41,8 +47,26 @@ _AC_CACHE: dict = {}
 _AC_CACHE_MAX = 512
 
 load_dotenv()
+init_sentry()
+
+
+def _client_ip(request: Request) -> str:
+    """Per-IP key for rate limiting. Cloud Run sets X-Forwarded-For with the
+    real client IP first in the chain, so prefer that over the proxy address."""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=_client_ip, default_limits=["120/hour"])
 
 app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# Apply canonical schema once at startup. Idempotent — CREATE TABLE IF NOT
+# EXISTS + CREATE INDEX IF NOT EXISTS in both schema files.
+init_schema()
 core = TaxGrieveCore()
 
 # Setup templates
@@ -78,23 +102,61 @@ def _county_for_zip(zip5: str) -> str:
     return ""
 
 
-@app.get("/autocomplete")
-async def autocomplete(q: str = ""):
-    """Address suggestions for Dutchess + Ulster.
+def _format_autocomplete_value(address: str, town: str, zip5: str = "") -> str:
+    parts = [p for p in [address, town, "NY"] if p]
+    value = ", ".join(parts)
+    return f"{value} {zip5}".strip() if zip5 else value
 
-    Backed by the US Census Geocoder (fast, ~200ms). Filters results to ZIP
-    codes within Dutchess or Ulster County. Triggers once the user has typed
-    a house number + at least 3 street chars.
-    """
-    q = (q or "").strip()
-    m = re.match(r"^\s*(\d+)\s+(\S.{2,})$", q)
-    if not m:
-        return JSONResponse({"suggestions": []})
 
-    cache_key = q.upper()
-    if cache_key in _AC_CACHE:
-        return JSONResponse({"suggestions": _AC_CACHE[cache_key]})
+def _normalize_parcel_suggestion(item: dict) -> dict:
+    address = (item.get("address") or "").strip()
+    town = (item.get("town") or "").strip()
+    zip5 = (item.get("zip") or "").strip()[:5]
+    if not zip5 and address and town:
+        _, _, zip5 = core._geocode(f"{address}, {town}, NY")
+        zip5 = (zip5 or "").strip()[:5]
+    county = item.get("county") or _county_for_zip(zip5) or ""
+    label = _format_autocomplete_value(address, town, zip5)
+    return {
+        "label": label,
+        "value": label,
+        "address": address,
+        "town": town,
+        "county": county,
+        "zip": zip5,
+        "parcelgrid": item.get("parcelgrid") or item.get("sbl") or "",
+        "sbl": item.get("sbl") or item.get("parcelgrid") or "",
+        "swis": item.get("swis") or "",
+        "source": "parcel",
+    }
 
+
+def _parcel_autocomplete(q: str, limit: int = 8) -> list[dict]:
+    detected = CountyFactory.detect_county(address_string=q)
+    handlers = [UlsterCounty(timeout=4)] if detected == "ulster" else [DutchessCounty()]
+
+    suggestions = []
+    seen = set()
+    for handler in handlers:
+        if not hasattr(handler, "suggest_addresses"):
+            continue
+        try:
+            for item in handler.suggest_addresses(q, limit=limit):
+                normalized = _normalize_parcel_suggestion(item)
+                key = normalized.get("parcelgrid") or (normalized["address"].upper(), normalized.get("zip"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                suggestions.append(normalized)
+                if len(suggestions) >= limit:
+                    return suggestions
+        except Exception as e:
+            print(f"parcel autocomplete error: {e}")
+    return suggestions
+
+
+def _census_autocomplete(q: str, limit: int = 8, existing_keys=None) -> tuple[list[dict], str]:
+    existing_keys = existing_keys or set()
     address_query = q if re.search(r"\bNY\b", q, re.IGNORECASE) else f"{q}, NY"
     try:
         resp = requests.get(
@@ -106,10 +168,10 @@ async def autocomplete(q: str = ""):
         matches = resp.json().get("result", {}).get("addressMatches", []) or []
     except Exception as e:
         print(f"autocomplete error: {e}")
-        return JSONResponse({"suggestions": [], "error": str(e)})
+        return [], str(e)
 
     suggestions = []
-    seen = set()
+    seen = set(existing_keys)
     for mm in matches:
         comp = mm.get("addressComponents", {}) or {}
         state = (comp.get("state") or "").upper()
@@ -129,34 +191,83 @@ async def autocomplete(q: str = ""):
         if key in seen:
             continue
         seen.add(key)
+        value = _format_autocomplete_value(street, city, zipc)
         suggestions.append({
-            "label": matched.title(),
-            "value": f"{street}, {city}",
+            "label": value,
+            "value": value,
             "address": street,
             "town": city,
             "county": county,
             "zip": zipc,
+            "parcelgrid": "",
+            "sbl": "",
+            "source": "census",
         })
-        if len(suggestions) >= 8:
+        if len(suggestions) >= limit:
             break
+    return suggestions, ""
+
+
+@app.get("/autocomplete")
+@limiter.limit("180/minute")
+async def autocomplete(request: Request, q: str = ""):
+    """Address suggestions for Dutchess + Ulster.
+
+    Parcel-backed suggestions come first so the selected result can carry an
+    authoritative SBL into /search_property. Census Geocoder results remain as
+    a fallback for broad/no-town queries and ZIP normalization.
+    """
+    q = (q or "").strip()
+    m = re.match(r"^\s*(\d+)\s+(\S.{2,})$", q)
+    if not m:
+        return JSONResponse({"suggestions": []})
+
+    cache_key = q.upper()
+    if cache_key in _AC_CACHE:
+        return JSONResponse({"suggestions": _AC_CACHE[cache_key]})
+
+    suggestions = _parcel_autocomplete(q, limit=8)
+    existing_keys = {(s["address"].upper(), s.get("zip")) for s in suggestions}
+    if len(suggestions) < 8:
+        census_items, census_error = _census_autocomplete(q, limit=8 - len(suggestions), existing_keys=existing_keys)
+        suggestions.extend(census_items)
+    else:
+        census_error = ""
 
     if len(_AC_CACHE) >= _AC_CACHE_MAX:
         _AC_CACHE.pop(next(iter(_AC_CACHE)))
     _AC_CACHE[cache_key] = suggestions
-    return JSONResponse({"suggestions": suggestions})
+    body = {"suggestions": suggestions}
+    if not suggestions and census_error:
+        body["error"] = census_error
+    return JSONResponse(body)
 
 @app.post("/search_property")
-async def search_property(request: Request, address: str = Form(...)):
+@limiter.limit("30/hour")
+async def search_property(
+    request: Request,
+    address: str = Form(...),
+    parcelgrid: str = Form(None),
+    sbl: str = Form(None),
+    county: str = Form(None),
+    zip_code: str = Form(None),
+):
     try:
-        subject = core.get_subject_profile(address.strip())
+        address = address.strip()
+        identifier = (parcelgrid or sbl or "").strip()
+        zip_code = (zip_code or "").strip()[:5] or None
+        if identifier:
+            subject = core.get_subject_profile_by_identifier(identifier, address_string=address, zip_code=zip_code)
+        else:
+            subject = core.get_subject_profile(address)
         if not subject:
             return {"status": "error", "message": f"Property not found: {address}"}
         
         subject_id = core.ensure_property(subject)
         # SBL-based routing is authoritative — it embeds the SWIS code which
         # tells us the actual county regardless of what was typed.
-        county = CountyFactory.get_county_handler(address_string=address, sbl=subject.get('sbl'))
-        subject['town'] = county.get_town_from_identifier(subject['sbl'])
+        county_handler = CountyFactory.get_county_handler(address_string=address, zip_code=zip_code, sbl=subject.get('sbl'))
+        subject['town'] = county_handler.get_town_from_identifier(subject['sbl'])
         
         return {
             "status": "success",
@@ -168,6 +279,7 @@ async def search_property(request: Request, address: str = Form(...)):
         return {"status": "error", "message": str(e)}
 
 @app.post("/report")
+@limiter.limit("20/hour")
 async def generate_report(
     request: Request,
     address: str = Form(...),
@@ -210,7 +322,7 @@ async def generate_report(
             subject = dict(row)
             
             cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED'" + (" AND is_selected = 1" if init_finalize else ""), (active_subject_id,))
-            comps = [dict(r) for r in cursor.fetchall()]
+            comps = core.filter_defensible_comps([dict(r) for r in cursor.fetchall()])
             conn.close()
 
             if not comps:
@@ -225,6 +337,12 @@ async def generate_report(
                 condition_factor=condition_factor,
                 enforce_selection=init_finalize
             )
+
+            if init_finalize and valuation["used_count"] < 3:
+                return HTMLResponse(
+                    "Select at least 3 defensible comparable sales before finalizing.",
+                    status_code=400,
+                )
             
             if init_update_curation:
                 sorted_comps = sorted([c for c in valuation["comps"] if c.get('status') != 'REJECTED'], key=lambda x: x.get('similarity_score', 0), reverse=True)
@@ -312,11 +430,12 @@ async def generate_report(
             conn = get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED'", (active_subject_id,))
-            comps = [dict(row) for row in cursor.fetchall()]
+            all_comps = [dict(row) for row in cursor.fetchall()]
+            comps = core.filter_defensible_comps(all_comps)
             conn.close()
 
             if not comps:
-                yield f"data: {json.dumps({'status': 'no_comps', 'message': 'No matching sales found.', 'subject_id': active_subject_id})}\n\n"
+                yield f"data: {json.dumps({'status': 'no_comps', 'message': 'No defensible comparable sales found automatically. Add manual comps or broaden the search.', 'subject_id': active_subject_id})}\n\n"
                 return
 
             condition_factors = {"below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20}
@@ -345,7 +464,7 @@ async def generate_report(
 
         except Exception as e:
             traceback.print_exc()
-            await send_error_report(str(e), traceback.format_exc())
+            send_error_report(e, {"phase": "report_stream", "traceback": traceback.format_exc()})
             yield f"data: {json.dumps({'status': 'error', 'message': f'System error: {str(e)}'})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -398,7 +517,7 @@ def _build_report_context(subject_id: int, renovation_year: int = None, conditio
         "SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED' AND is_selected = 1",
         (subject_id,),
     )
-    comps = [dict(r) for r in cursor.fetchall()]
+    comps = core.filter_defensible_comps([dict(r) for r in cursor.fetchall()])
     conn.close()
 
     condition_factors = {"below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20}
@@ -442,9 +561,80 @@ def _build_report_context(subject_id: int, renovation_year: int = None, conditio
     }
 
 
+_TOS_PAGE_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Acknowledgement — griever</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 40px auto; padding: 20px; color: #2c3e50; line-height: 1.55; }
+h1 { color: #1a252f; }
+.box { background: #fffaf0; border: 1px solid #f0d9a8; padding: 18px; border-radius: 4px; margin: 20px 0; }
+.box ul { margin: 10px 0 0 0; padding-left: 20px; }
+button { background: #27ae60; color: white; border: none; padding: 12px 24px; font-size: 15px; border-radius: 4px; cursor: pointer; }
+button:hover { background: #1e8449; }
+.cancel { background: #95a5a6; margin-left: 8px; }
+.cancel:hover { background: #7f8c8d; }
+</style></head>
+<body>
+<h1>Before downloading your grievance package</h1>
+<p>The PDF you are about to download is generated by an automated valuation model. Please acknowledge the following before proceeding.</p>
+<div class="box">
+<ul>
+<li>This report is <strong>not</strong> a certified appraisal and does not constitute legal or tax advice.</li>
+<li>Filing decisions and the accuracy of any RP-524 you submit are <strong>your sole responsibility</strong>.</li>
+<li>For high-value or complex properties, consult a licensed real-estate appraiser or tax-grievance attorney.</li>
+<li>griever is not liable for errors in third-party data sources (NYS ORPTS, Dutchess/Ulster county records, Zillow/RapidAPI listings).</li>
+</ul>
+</div>
+<form method="post" action="/accept_tos">
+  <input type="hidden" name="next" value="{next_url}">
+  <button type="submit">I acknowledge — continue to download</button>
+  <a href="{back_url}"><button type="button" class="cancel">Cancel</button></a>
+</form>
+</body></html>
+"""
+
+
+@app.post("/accept_tos")
+async def accept_tos(request: Request, next: str = Form("/")):
+    """Set the ToS-accepted cookie and bounce the user back to where they
+    came from (typically the report page that linked to the PDF)."""
+    from fastapi.responses import RedirectResponse
+    # Allow only same-origin relative paths to defeat open-redirect abuse.
+    safe_next = next if next.startswith("/") and not next.startswith("//") else "/"
+    resp = RedirectResponse(url=safe_next, status_code=303)
+    resp.set_cookie(
+        TOS_COOKIE,
+        make_tos_cookie(),
+        max_age=TOS_TTL,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+    )
+    return resp
+
+
+def _tos_gate_redirect(request: Request) -> HTMLResponse:
+    """Render the gate page with the current URL stashed so /accept_tos can
+    bounce back to it after acceptance."""
+    next_url = str(request.url.path)
+    if request.url.query:
+        next_url = f"{next_url}?{request.url.query}"
+    # Use .replace() rather than .format() — the embedded CSS has literal
+    # '{' / '}' that confuse Python's format-string parser.
+    import html as _html
+    rendered = (
+        _TOS_PAGE_HTML
+        .replace("{next_url}", _html.escape(next_url, quote=True))
+        .replace("{back_url}", "/")
+    )
+    return HTMLResponse(rendered)
+
+
 @app.get("/grievance/rp524.pdf")
-async def grievance_rp524(subject_id: int, renovation_year: int = None, condition: str = "average",
+@limiter.limit("10/day")
+async def grievance_rp524(request: Request, subject_id: int, renovation_year: int = None, condition: str = "average",
                           owner_name: str = None, owner_address: str = None, owner_email: str = None, owner_phone: str = None):
+    if not require_tos_accepted(request):
+        return _tos_gate_redirect(request)
     from fastapi.responses import Response
     from app.pdf_gen import render_rp524
     ctx = _build_report_context(subject_id, renovation_year, condition)
@@ -463,7 +653,10 @@ async def grievance_rp524(subject_id: int, renovation_year: int = None, conditio
 
 
 @app.get("/grievance/methodology.pdf")
-async def grievance_methodology(subject_id: int, renovation_year: int = None, condition: str = "average"):
+@limiter.limit("20/day")
+async def grievance_methodology(request: Request, subject_id: int, renovation_year: int = None, condition: str = "average"):
+    if not require_tos_accepted(request):
+        return _tos_gate_redirect(request)
     from fastapi.responses import Response
     from app.pdf_gen import render_methodology
     ctx = _build_report_context(subject_id, renovation_year, condition)
@@ -476,8 +669,11 @@ async def grievance_methodology(subject_id: int, renovation_year: int = None, co
 
 
 @app.get("/grievance/package.zip")
-async def grievance_package(subject_id: int, renovation_year: int = None, condition: str = "average",
+@limiter.limit("10/day")
+async def grievance_package(request: Request, subject_id: int, renovation_year: int = None, condition: str = "average",
                             owner_name: str = None, owner_address: str = None, owner_email: str = None, owner_phone: str = None):
+    if not require_tos_accepted(request):
+        return _tos_gate_redirect(request)
     from fastapi.responses import Response
     from app.pdf_gen import render_rp524, render_methodology
     import zipfile, io

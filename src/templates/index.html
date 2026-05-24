@@ -3,65 +3,175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
     <title>TaxGrieve NY</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f7f6; color: #333; margin: 0; padding: 0; }
-        .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        h1 { color: #2c3e50; text-align: center; }
-        p { text-align: center; color: #7f8c8d; }
+        :root {
+            --bg: #edf2f0;
+            --surface: #ffffff;
+            --surface-soft: #f7f9f8;
+            --border: #d9e2df;
+            --text: #1f2d2a;
+            --muted: #64736f;
+            --primary: #1f8a5b;
+            --primary-dark: #176e48;
+            --accent: #245c7a;
+            --warning: #bf6516;
+            --danger: #b33a32;
+            --shadow: 0 18px 45px rgba(31, 45, 42, 0.10);
+        }
+        * { box-sizing: border-box; }
+        body {
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 32px 16px;
+        }
+        .container {
+            width: min(760px, 100%);
+            margin: 0 auto;
+            background: var(--surface);
+            padding: clamp(24px, 5vw, 40px);
+            border: 1px solid rgba(217, 226, 223, 0.9);
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+        }
+        h1 { color: var(--text); text-align: center; margin: 0; font-size: clamp(32px, 7vw, 44px); line-height: 1.05; letter-spacing: 0; }
+        p { text-align: center; color: var(--muted); line-height: 1.5; }
         .form-box { margin-top: 30px; }
-        input[type="text"] { width: 100%; padding: 15px; margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
+        input[type="text"], input[type="number"], select {
+            width: 100%;
+            min-height: 44px;
+            padding: 12px 14px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: #fff;
+            color: var(--text);
+            font-size: 16px;
+        }
+        input[type="text"] { margin-bottom: 20px; }
+        label { line-height: 1.35; }
 
         /* Autocomplete dropdown */
         .ac-wrap { position: relative; margin-bottom: 20px; }
         .ac-wrap input[type="text"] { margin-bottom: 0; }
-        #ac-list { position: absolute; left: 0; right: 0; top: 100%; background: white; border: 1px solid #ddd; border-top: none; border-radius: 0 0 4px 4px; max-height: 280px; overflow-y: auto; z-index: 10; display: none; box-shadow: 0 6px 14px rgba(0,0,0,0.08); }
+        #ac-list { position: absolute; left: 0; right: 0; top: 100%; background: white; border: 1px solid var(--border); border-top: none; border-radius: 0 0 6px 6px; max-height: 280px; overflow-y: auto; z-index: 10; display: none; box-shadow: 0 10px 24px rgba(31,45,42,0.12); }
         #ac-list .ac-item { padding: 10px 14px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #f1f1f1; }
         #ac-list .ac-item:last-child { border-bottom: none; }
-        #ac-list .ac-item:hover, #ac-list .ac-item.active { background: #f4f7f6; }
-        #ac-list .ac-county { float: right; color: #7f8c8d; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-        #ac-list .ac-hint { padding: 10px 14px; font-size: 12px; color: #95a5a6; font-style: italic; }
-        button { width: 100%; padding: 15px; background: #27ae60; color: white; border: none; border-radius: 4px; font-size: 18px; cursor: pointer; transition: background 0.3s; }
-        button:hover { background: #219150; }
-        button:disabled { background: #bdc3c7; cursor: not-allowed; }
-        #log { margin-top: 20px; background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; font-family: monospace; font-size: 12px; height: 120px; overflow-y: auto; display: none; }
+        #ac-list .ac-item:hover, #ac-list .ac-item.active { background: var(--surface-soft); }
+        #ac-list .ac-county { float: right; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        #ac-list .ac-source { display: inline-block; margin-left: 6px; color: var(--primary-dark); font-size: 10px; text-transform: uppercase; font-weight: 800; letter-spacing: 0.4px; }
+        #ac-list .ac-hint { padding: 10px 14px; font-size: 12px; color: var(--muted); font-style: italic; }
+        .field-help { margin: 6px 0 0; font-size: 12px; color: var(--muted); text-align: left; min-height: 17px; }
+        .field-help.good { color: var(--primary-dark); font-weight: 700; }
+        .field-help.warn { color: var(--warning); font-weight: 700; }
+        button {
+            width: 100%;
+            min-height: 48px;
+            padding: 13px 16px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 17px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.2s;
+        }
+        button:hover { background: var(--primary-dark); }
+        button:active { transform: translateY(1px); }
+        button:disabled { background: #b8c3c0; cursor: not-allowed; transform: none; }
+        #log { margin-top: 20px; background: #1f2d2a; color: #eef5f2; padding: 14px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.5; height: 140px; overflow-y: auto; display: none; }
         
         /* New Styles for Cards and Verification */
         #verification-step { margin-top: 30px; display: none; }
-        .card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-        .card-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-        .card-title { font-size: 18px; font-weight: bold; color: #2c3e50; margin: 0; }
+        #progress, #live-table-container, #rejected-container { display: none; }
+        .card { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; padding: 18px; margin-bottom: 20px; }
+        .card-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; cursor: pointer; }
+        .card-title { font-size: 18px; font-weight: bold; color: var(--text); margin: 0; }
         .card-details { display: none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
         .spec-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 14px; }
-        .spec-item b { color: #7f8c8d; font-size: 11px; text-transform: uppercase; display: block; }
+        .spec-item b { color: var(--muted); font-size: 11px; text-transform: uppercase; display: block; letter-spacing: 0.4px; }
         
-        #live-table-container { margin-top: 30px; display: none; }
-        #rejected-container { margin-top: 40px; display: none; opacity: 0.6; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; background: white; }
+        #live-table-container { margin-top: 30px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        #rejected-container { margin-top: 40px; opacity: 0.65; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        table { width: 100%; min-width: 560px; border-collapse: collapse; margin-top: 10px; font-size: 14px; background: white; }
         th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
-        th { background: #f8f9fa; color: #7f8c8d; text-transform: uppercase; font-size: 11px; }
+        th { background: var(--surface-soft); color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.4px; }
         
         .comp-row:hover { background: #fdfdfd; }
-        .details-btn { color: #3498db; cursor: pointer; font-size: 12px; text-decoration: underline; }
+        .details-btn { color: var(--accent); cursor: pointer; font-size: 12px; text-decoration: underline; white-space: nowrap; }
         .rejected-row td { text-decoration: line-through; }
         
         .status-pill { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; }
         .status-verified { background: #e8f5e9; color: #2e7d32; }
         .status-unverified { background: #fff3e0; color: #ef6c00; }
+        .progress-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0 18px; }
+        .progress-stat { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+        .progress-stat b { display: block; font-size: 20px; line-height: 1.1; color: var(--text); }
+        .progress-stat span { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+        .progress-note { margin: 0 0 12px; font-size: 13px; color: var(--muted); text-align: left; }
         
         .action-btns { display: flex; gap: 20px; margin-top: 20px; }
         .btn-confirm { background: #27ae60; flex: 2; }
         .btn-cancel { background: #95a5a6; flex: 1; }
         .btn-report { background: #2c3e50; flex: 1; display: none; }
         .controls { display: flex; gap: 10px; margin-top: 20px; }
-        .timer { font-weight: bold; color: #e67e22; }
-        .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #bdc3c7; }
+        .timer { font-weight: bold; color: var(--warning); }
+        .footer { margin-top: 36px; text-align: center; font-size: 12px; color: #86938f; line-height: 1.45; }
         
-        .explainer { background: #e3f2fd; border-left: 4px solid #1565c0; padding: 10px 15px; margin-bottom: 20px; border-radius: 4px; font-size: 14px; }
-        .explainer summary { font-weight: bold; cursor: pointer; color: #1565c0; outline: none; list-style: none; }
+        .explainer { background: #edf7fb; border-left: 4px solid var(--accent); padding: 12px 15px; margin-bottom: 20px; border-radius: 6px; font-size: 14px; }
+        .explainer summary { font-weight: bold; cursor: pointer; color: var(--accent); outline: none; list-style: none; }
         .explainer summary::-webkit-details-marker { display: none; }
-        .explainer summary::before { content: "ℹ️ "; }
+        .explainer summary::before { content: "Info: "; }
         .explainer p { margin: 8px 0 0 0; color: #333; line-height: 1.4; }
+        .inline-field, .check-field {
+            margin: 15px 0;
+            color: var(--text);
+        }
+        .inline-field label {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 110px;
+            gap: 12px;
+            align-items: center;
+            font-size: 14px;
+        }
+        .check-field label {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .check-field input { margin-top: 3px; }
+        .question { font-size: 14px; color: var(--warning); font-weight: 700; margin-top: 20px; }
+        .progress-box { margin-top: 30px; }
+        #status-msg { margin-bottom: 10px; font-weight: 700; }
+        .btn-stop { background: var(--warning); }
+
+        @media (max-width: 640px) {
+            body { padding: 0; background: var(--surface); }
+            .container {
+                min-height: 100vh;
+                border: 0;
+                border-radius: 0;
+                box-shadow: none;
+                padding: 28px 18px;
+            }
+            p { text-align: left; }
+            .container > h1, .container > p { text-align: center; }
+            .spec-grid { grid-template-columns: 1fr; }
+            .card-header { align-items: flex-start; }
+            .action-btns, .controls { flex-direction: column; gap: 10px; }
+            .inline-field label { grid-template-columns: 1fr; }
+            .inline-field input { width: 100%; margin: 0 !important; }
+            .progress-stats { grid-template-columns: 1fr; }
+            table { font-size: 13px; }
+            th, td { padding: 10px; }
+            #resume-banner button { width: 100% !important; }
+        }
     </style>
 </head>
 <body>
@@ -78,7 +188,12 @@
             <div class="ac-wrap">
                 <input type="text" id="address" placeholder="e.g. 67 N Parsonage St, Rhinebeck" autocomplete="off" required>
                 <div id="ac-list" role="listbox"></div>
+                <div id="address-status" class="field-help">Start with a house number and street; parcel-backed matches will verify fastest.</div>
             </div>
+            <input type="hidden" id="selected-parcelgrid">
+            <input type="hidden" id="selected-sbl">
+            <input type="hidden" id="selected-county">
+            <input type="hidden" id="selected-zip">
             <button id="search-btn" onclick="searchProperty()">Find My Property</button>
         </div>
 
@@ -101,7 +216,6 @@
                         <div class="spec-item"><b>Last Year (2025) Roll</b> <span id="s-ass-25"></span></div>
                     </div>
                 </div>
-                </div>
             </div>
         </div>
 
@@ -112,21 +226,21 @@
                 <p>Checking <b>Force Deep Verification</b> forces the system to rigorously cross-reference every discovered comparable sale against the County Database. <i>Note: This process is slower and can take 2-3 minutes to complete.</i></p>
             </details>
             
-            <div style="margin-top: 15px; margin-bottom: 15px;">
-                <label style="font-size: 14px; color: #2c3e50;">
+            <div class="inline-field">
+                <label>
                     <b>Renovation / Remodel Year (if applicable):</b>
-                    <input type="number" id="renov-year" placeholder="YYYY" style="width: 80px; padding: 5px; margin-left: 10px;" min="1900" max="2026">
+                    <input type="number" id="renov-year" placeholder="YYYY" min="1900" max="2026">
                 </label>
             </div>
             
-            <div style="margin-top: 15px; margin-bottom: 15px;">
-                <label style="font-size: 14px; color: #2c3e50; cursor: pointer;">
-                    <input type="checkbox" id="force-verify-cb" checked> Force Deep Verification (Slower, but verifies all comps with County Database)
+            <div class="check-field">
+                <label>
+                    <input type="checkbox" id="force-verify-cb" checked> Verify discovered comps against county parcel records
                 </label>
             </div>
-            <p style="font-size:14px; color:#e67e22; font-weight:bold;">Is this the correct property?</p>
+            <p class="question">Is this the correct property?</p>
             <div class="action-btns">
-                <button class="btn-confirm" onclick="startDiscovery()">Yes, Start Search</button>
+                <button id="start-btn" class="btn-confirm" onclick="startDiscovery()">Yes, Find Comparable Sales</button>
                 <button class="btn-cancel" onclick="resetSearch()">No, Search Again</button>
             </div>
         </div>
@@ -134,11 +248,17 @@
         <div id="progress" class="progress-box">
             <details class="explainer">
                 <summary>Live Discovery Process</summary>
-                <p>The system is now querying live real estate APIs to find 40 recent sales in your area. As properties are found, they are streamed below. The system automatically filters out active listings and repairs missing data points (like square footage) in real-time.</p>
+                <p>The system is finding recent nearby sales, verifying the best matches against county parcel records, and keeping only defensible comps for review. Most searches finish in under a minute; thin markets can take longer.</p>
             </details>
-            <div id="status-msg" style="margin-bottom: 10px; font-weight: bold;">Preparing discovery...</div>
+            <div id="status-msg">Preparing discovery...</div>
+            <div class="progress-stats" aria-live="polite">
+                <div class="progress-stat"><b id="verified-count">0</b><span>Qualified</span></div>
+                <div class="progress-stat"><b id="checked-count">0</b><span>Checked</span></div>
+                <div class="progress-stat"><b id="target-count">3</b><span>Needed</span></div>
+            </div>
+            <p id="progress-note" class="progress-note">We need at least 3 qualified comparable sales before a final report can be generated.</p>
             <div class="controls">
-                <button id="stop-btn" class="btn-stop" onclick="stopAnalysis()" style="background: #e67e22;">Pause & Rank Comps</button>
+                <button id="stop-btn" class="btn-stop" onclick="stopAnalysis()">Pause & Rank Comps</button>
             </div>
         </div>
 
@@ -179,11 +299,58 @@
         let controller;
         let currentSubject;
         let currentSubjectId;
+        let selectedAddressSuggestion = null;
+        let discoveryStats = { verified: 0, checked: 0, total: 0 };
+        window.__curationRendered = false;
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, ch => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[ch]));
+        }
+
+        function setOptionalDisplay(id, display) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = display;
+        }
+
+        function updateDiscoveryStats() {
+            const verifiedEl = document.getElementById('verified-count');
+            const checkedEl = document.getElementById('checked-count');
+            const targetEl = document.getElementById('target-count');
+            const noteEl = document.getElementById('progress-note');
+            if (verifiedEl) verifiedEl.innerText = discoveryStats.verified;
+            if (checkedEl) checkedEl.innerText = discoveryStats.total ? `${discoveryStats.checked}/${discoveryStats.total}` : discoveryStats.checked;
+            if (targetEl) targetEl.innerText = Math.max(0, 3 - discoveryStats.verified);
+            if (noteEl) {
+                noteEl.innerText = discoveryStats.verified >= 3
+                    ? 'Enough qualified comps found. We will keep checking the remaining top candidates, then open the curation dashboard.'
+                    : 'We need at least 3 qualified comparable sales before a final report can be generated.';
+            }
+        }
+
+        function fmtNum(value) {
+            const n = Number(value || 0);
+            return Number.isFinite(n) ? n.toLocaleString() : '0';
+        }
+
+        function fmtMoney(value) {
+            return '$' + fmtNum(value);
+        }
 
         // ---------- Address autocomplete ----------
         (function setupAutocomplete() {
             const input = document.getElementById('address');
             const list = document.getElementById('ac-list');
+            const addressStatus = document.getElementById('address-status');
+            const parcelgridInput = document.getElementById('selected-parcelgrid');
+            const sblInput = document.getElementById('selected-sbl');
+            const countyInput = document.getElementById('selected-county');
+            const zipInput = document.getElementById('selected-zip');
             let debounceTimer = null;
             let activeIdx = -1;
             let currentItems = [];
@@ -191,6 +358,19 @@
             let inFlight = null;
 
             function hide() { list.style.display = 'none'; activeIdx = -1; }
+            function setSelectedSuggestion(item) {
+                selectedAddressSuggestion = item || null;
+                parcelgridInput.value = item?.parcelgrid || '';
+                sblInput.value = item?.sbl || '';
+                countyInput.value = item?.county || '';
+                zipInput.value = item?.zip || '';
+                if (addressStatus) {
+                    addressStatus.className = item?.parcelgrid ? 'field-help good' : 'field-help warn';
+                    addressStatus.innerText = item?.parcelgrid
+                        ? `County parcel selected for ${item.county || 'local'} records.`
+                        : 'Using a geocoded address fallback. Parcel verification may take longer.';
+                }
+            }
             function render(items, hint) {
                 if (hint) {
                     list.innerHTML = `<div class="ac-hint">${hint}</div>`;
@@ -203,7 +383,8 @@
                 list.innerHTML = items.map((it, i) => `
                     <div class="ac-item" data-i="${i}" role="option">
                         <span class="ac-county">${it.county || ''}</span>
-                        ${it.label}
+                        ${escapeHtml(it.label)}
+                        <span class="ac-source">${it.source === 'parcel' ? 'parcel' : 'map'}</span>
                     </div>`).join('');
                 list.style.display = 'block';
                 Array.from(list.querySelectorAll('.ac-item')).forEach(el => {
@@ -222,20 +403,33 @@
                 const it = currentItems[idx];
                 if (!it) return;
                 input.value = it.value;
+                setSelectedSuggestion(it);
                 hide();
             }
             async function fetchSuggestions(q) {
                 if (inFlight) inFlight.abort();
                 inFlight = new AbortController();
                 render([], 'Searching parcels…');
+                if (addressStatus) {
+                    addressStatus.className = 'field-help';
+                    addressStatus.innerText = 'Searching parcel records first, then map/geocoder fallback.';
+                }
                 try {
                     const resp = await fetch(`/autocomplete?q=${encodeURIComponent(q)}`, { signal: inFlight.signal });
                     const data = await resp.json();
                     if (q !== lastQuery) return; // stale
                     if ((data.suggestions || []).length === 0) {
                         render([], data.error ? 'Lookup unavailable — type the full address.' : 'No matches in Dutchess or Ulster.');
+                        if (addressStatus) {
+                            addressStatus.className = 'field-help warn';
+                            addressStatus.innerText = data.error ? 'Autocomplete is unavailable; you can still submit the full address.' : 'No autocomplete match yet. Try adding town and ZIP.';
+                        }
                     } else {
                         render(data.suggestions);
+                        if (addressStatus) {
+                            addressStatus.className = 'field-help';
+                            addressStatus.innerText = 'Choose a parcel-backed suggestion when available for the strongest match.';
+                        }
                     }
                 } catch (e) {
                     if (e.name !== 'AbortError') console.warn('autocomplete', e);
@@ -243,11 +437,17 @@
             }
             input.addEventListener('input', () => {
                 const q = input.value.trim();
+                setSelectedSuggestion(null);
                 lastQuery = q;
                 clearTimeout(debounceTimer);
                 if (!/^\d+\s+\S/.test(q)) {
-                    if (/^\d+\s*$/.test(q)) render([], 'Keep typing the street name…');
-                    else hide();
+                    if (/^\d+\s*$/.test(q)) {
+                        render([], 'Keep typing the street name…');
+                        if (addressStatus) addressStatus.innerText = 'Keep typing the street name.';
+                    } else {
+                        hide();
+                        if (addressStatus) addressStatus.innerText = 'Start with a house number and street; parcel-backed matches will verify fastest.';
+                    }
                     return;
                 }
                 debounceTimer = setTimeout(() => fetchSuggestions(q), 180);
@@ -293,6 +493,14 @@
 
             const formData = new FormData();
             formData.append('address', addr);
+            const parcelgrid = document.getElementById('selected-parcelgrid').value;
+            const sbl = document.getElementById('selected-sbl').value;
+            const county = document.getElementById('selected-county').value;
+            const zip = document.getElementById('selected-zip').value;
+            if (parcelgrid) formData.append('parcelgrid', parcelgrid);
+            if (sbl) formData.append('sbl', sbl);
+            if (county) formData.append('county', county);
+            if (zip) formData.append('zip_code', zip);
 
             fetch('/search_property', { method: 'POST', body: formData })
                 .then(r => r.json())
@@ -305,12 +513,12 @@
                         document.getElementById('subject-addr-display').innerText = currentSubject.address;
                         document.getElementById('s-beds').innerText = currentSubject.bedrooms;
                         document.getElementById('s-baths').innerText = currentSubject.bathrooms;
-                        document.getElementById('s-sqft').innerText = currentSubject.sqft.toLocaleString();
+                        document.getElementById('s-sqft').innerText = fmtNum(currentSubject.sqft);
                         document.getElementById('s-year').innerText = currentSubject.year_built;
                         document.getElementById('s-acre').innerText = currentSubject.acreage;
                         document.getElementById('s-town').innerText = currentSubject.town;
-                        document.getElementById('s-ass-25').innerText = '$' + currentSubject.assessment_2025.toLocaleString();
-                        document.getElementById('s-ass-26').innerText = '$' + (currentSubject.assessment_2026 || 0).toLocaleString();
+                        document.getElementById('s-ass-25').innerText = fmtMoney(currentSubject.assessment_2025);
+                        document.getElementById('s-ass-26').innerText = fmtMoney(currentSubject.assessment_2026);
                         
                         // Save session token (subject_id)
                         localStorage.setItem('griever_session_id', currentSubjectId);
@@ -325,6 +533,11 @@
                         btn.disabled = false;
                         btn.innerText = "Find My Property";
                     }
+                })
+                .catch(() => {
+                    log.innerHTML += `<span style="color: #e74c3c;">> Search failed. Please check your connection and try again.</span>\n`;
+                    btn.disabled = false;
+                    btn.innerText = "Find My Property";
                 });
         }
 
@@ -334,6 +547,11 @@
             document.getElementById('verification-step').style.display = 'none';
             document.getElementById('search-btn').disabled = false;
             document.getElementById('search-btn').innerText = "Find My Property";
+            selectedAddressSuggestion = null;
+            document.getElementById('selected-parcelgrid').value = '';
+            document.getElementById('selected-sbl').value = '';
+            document.getElementById('selected-county').value = '';
+            document.getElementById('selected-zip').value = '';
         }
 
         function stopAnalysis() {
@@ -354,6 +572,12 @@
             document.getElementById('progress').style.display = 'block';
             document.getElementById('live-table-container').style.display = 'block';
             document.getElementById('log').style.display = 'block';
+            window.__curationRendered = false;
+            discoveryStats = { verified: 0, checked: 0, total: 0 };
+            updateDiscoveryStats();
+            document.getElementById('live-table-body').innerHTML = '';
+            const startBtn = document.getElementById('start-btn');
+            if (startBtn) startBtn.disabled = true;
             
             if (skipDiscovery) {
                 document.getElementById('status-msg').innerHTML = "Loading Curation Dashboard...";
@@ -389,12 +613,12 @@
                     reader.read().then(({ done, value }) => {
                         if (done) {
                             const statusEl = document.getElementById('status-msg');
-                            if (statusEl && !document.body.innerHTML.includes('Curation Dashboard')) {
+                            if (statusEl && !window.__curationRendered) {
                                 if (!statusEl.innerHTML.includes('Error Occurred')) {
                                     statusEl.innerHTML = "Stream completed but UI did not load. Please check logs or try again.";
                                 }
-                                document.getElementById('stop-btn').style.display = 'none';
-                                document.getElementById('resume-btn').style.display = 'block';
+                                setOptionalDisplay('stop-btn', 'none');
+                                setOptionalDisplay('resume-btn', 'block');
                             }
                             return;
                         }
@@ -418,19 +642,25 @@
                         else {
                             console.error('Fetch error:', err);
                             const statusEl = document.getElementById('status-msg');
-                            if (statusEl) statusEl.innerHTML = "❌ Connection Lost";
-                            document.getElementById('stop-btn').style.display = 'none';
-                            document.getElementById('resume-btn').style.display = 'block';
+                            if (statusEl) statusEl.innerHTML = "Connection lost. You can refresh and resume from the saved session.";
+                            setOptionalDisplay('stop-btn', 'none');
+                            setOptionalDisplay('resume-btn', 'block');
                         }
                     });
                 }
                 read();
+            }).catch(() => {
+                const statusEl = document.getElementById('status-msg');
+                if (statusEl) statusEl.innerHTML = "Could not start discovery. Please try again.";
+                setOptionalDisplay('stop-btn', 'none');
             });
         }
 
         function handleUpdate(data) {
             if (data.status === 'render_ui') {
+                window.__curationRendered = true;
                 document.body.innerHTML = data.html;
+                setTimeout(updateSelectionSummary, 0);
                 if (controller) controller.abort(); // Stop listening
                 return;
             }
@@ -450,18 +680,26 @@
                     log.innerHTML += `> ${msg}\n`;
                 }
             } else if (data.status === 'verifying') {
+                discoveryStats.checked = Math.max(discoveryStats.checked, Number(data.current || discoveryStats.checked));
+                discoveryStats.total = Number(data.total || discoveryStats.total);
+                updateDiscoveryStats();
                 log.innerHTML += `> Checking ${data.address} (${data.current}/${data.total})...\n`;
                 status.innerHTML = `Verifying ${data.current}/${data.total}...`;
             } else if (data.status === 'resuming') {
+                if ((data.message || '').startsWith('Rejected')) {
+                    discoveryStats.checked += 1;
+                    updateDiscoveryStats();
+                }
                 log.innerHTML += `> Resumed: ${data.message || data.address}\n`;
             } else if (data.status === 'error') {
-                status.innerHTML = "❌ Error Occurred";
+                status.innerHTML = "Error occurred";
                 log.innerHTML += `<span style="color: #e74c3c;">ERROR: ${data.message}</span>\n`;
-                document.getElementById('stop-btn').style.display = 'none';
-                document.getElementById('resume-btn').style.display = 'block';
+                setOptionalDisplay('stop-btn', 'none');
+                setOptionalDisplay('resume-btn', 'block');
             } else if (data.status === 'verified') {
                 const comp = data.comp;
-                const rowId = `comp-${comp.zpid || comp.address.replace(/\s+/g, '-')}`;
+                const safeKey = String(comp.zpid || comp.address || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '-');
+                const rowId = `comp-${safeKey}`;
                 if (!document.getElementById(rowId)) {
                     const row = document.createElement('tr');
                     row.id = rowId;
@@ -469,33 +707,39 @@
                     const statusClass = comp.status === 'VERIFIED' ? 'status-verified' : 'status-unverified';
                     
                     const detailsId = `details-${rowId}`;
-                    const ass26 = comp.assessment_2026 ? `$${comp.assessment_2026.toLocaleString()}` : 'N/A';
-                    const ass25 = comp.assessment_2025 ? `$${comp.assessment_2025.toLocaleString()}` : 'N/A';
+                    const ass26 = comp.assessment_2026 ? fmtMoney(comp.assessment_2026) : 'N/A';
+                    const ass25 = comp.assessment_2025 ? fmtMoney(comp.assessment_2025) : 'N/A';
 
                     row.innerHTML = `
                         <td>
-                            <b>${comp.address}</b><br>
+                            <b>${escapeHtml(comp.address)}</b><br>
                             <span class="details-btn" onclick="toggleDetails('${detailsId}')">View Details ▼</span>
                             <div id="${detailsId}" class="card-details">
                                 <div class="spec-grid">
-                                    <div class="spec-item"><b>Beds/Baths</b> ${comp.bedrooms}/${comp.bathrooms}</div>
-                                    <div class="spec-item"><b>Size</b> ${comp.sqft} sqft</div>
-                                    <div class="spec-item"><b>Year</b> ${comp.year_built || 'N/A'}</div>
-                                    <div class="spec-item"><b>Acreage</b> ${comp.acreage}</div>
+                                    <div class="spec-item"><b>Beds/Baths</b> ${escapeHtml(comp.bedrooms)}/${escapeHtml(comp.bathrooms)}</div>
+                                    <div class="spec-item"><b>Size</b> ${fmtNum(comp.sqft)} sqft</div>
+                                    <div class="spec-item"><b>Year</b> ${escapeHtml(comp.year_built || 'N/A')}</div>
+                                    <div class="spec-item"><b>Acreage</b> ${escapeHtml(comp.acreage)}</div>
                                     <div class="spec-item"><b>2026 Assmt</b> ${ass26}</div>
                                     <div class="spec-item"><b>2025 Assmt</b> ${ass25}</div>
                                 </div>
                             </div>
                         </td>
-                        <td>$${comp.sale_price.toLocaleString()}</td>
-                        <td><span class="status-pill ${statusClass}">${comp.status}</span></td>
-                        <td><button onclick="rejectComp('${comp.address}', '${comp.zpid || ''}', '${rowId}')" style="font-size:11px; background:#eee; color:#333;">Reject</button></td>
+                        <td>${fmtMoney(comp.sale_price)}</td>
+                        <td><span class="status-pill ${statusClass}">${escapeHtml(comp.status)}</span></td>
+                        <td><button class="reject-live-btn" type="button" style="font-size:11px; background:#eee; color:#333;">Reject</button></td>
                     `;
+                    row.querySelector('.reject-live-btn').addEventListener('click', () => rejectComp(comp.address, comp.zpid || '', rowId));
                     tableBody.prepend(row);
                 }
-                status.innerHTML = `Discovered ${tableBody.children.length} comps...`;
+                discoveryStats.verified = tableBody.children.length;
+                updateDiscoveryStats();
+                status.innerHTML = discoveryStats.verified >= 3
+                    ? `Found ${discoveryStats.verified} qualified comps. Finishing checks...`
+                    : `Found ${discoveryStats.verified} qualified comps. Looking for at least 3...`;
             } else if (data.status === 'no_comps') {
-                status.innerHTML = "No Comps Found Automatically";
+                status.innerHTML = "No qualified comps found automatically";
+                document.getElementById('progress-note').innerText = "Add manual comps below or run another search with a fuller address.";
                 showManualForm(data.subject_id);
             }
             log.scrollTop = log.scrollHeight;
@@ -522,6 +766,30 @@
         }
 
         // Curation phase functions
+        function currentSelectedCount() {
+            return Array.from(document.querySelectorAll('.btn-select.selected'))
+                .filter(btn => {
+                    const row = btn.closest('tr');
+                    return !row || row.style.display !== 'none';
+                }).length;
+        }
+
+        function updateSelectionSummary() {
+            const count = currentSelectedCount();
+            const banner = document.getElementById('selection-banner');
+            const countEl = document.getElementById('selected-count');
+            const copyEl = document.getElementById('selection-copy');
+            const finalizeBtn = document.getElementById('finalize-btn');
+            if (countEl) countEl.innerText = count;
+            if (banner) banner.classList.toggle('ready', count >= 3);
+            if (copyEl) {
+                copyEl.innerText = count >= 3
+                    ? 'Ready to finalize. Review your selections, then generate the report.'
+                    : `Select ${3 - count} more defensible comp${3 - count === 1 ? '' : 's'} before finalizing.`;
+            }
+            if (finalizeBtn) finalizeBtn.disabled = count < 3;
+        }
+
         function toggleSelect(idx, subjectId, zpid, address) {
             const btn = document.getElementById(`sel-${idx}`);
             const isSelected = btn.classList.contains('selected');
@@ -543,6 +811,7 @@
                             btn.classList.add('selected');
                             btn.innerText = 'Selected';
                         }
+                        updateSelectionSummary();
                     }
                 });
         }
@@ -570,6 +839,7 @@
                     if(data.status === 'success') {
                         document.getElementById(`row-${idx}`).style.display = 'none';
                         document.getElementById('rejectModal').style.display = 'none';
+                        updateSelectionSummary();
                     }
                 });
         }
@@ -577,9 +847,12 @@
         // Event delegation for dynamically added form
         document.addEventListener('submit', function(e) {
             if (e.target && e.target.id === 'finalize-form') {
-                const selectedCount = document.querySelectorAll('.btn-select.selected').length;
+                const selectedCount = currentSelectedCount();
                 if (selectedCount < 3) {
                     e.preventDefault();
+                    updateSelectionSummary();
+                    const banner = document.getElementById('selection-banner');
+                    if (banner) banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     alert("Please select at least 3 comps to finalize your valuation.");
                 }
             }
@@ -741,6 +1014,7 @@
                     btn.click();
                 }
             });
+            setTimeout(updateSelectionSummary, 350);
         }
 
         // Check for saved session on load

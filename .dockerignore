@@ -1,0 +1,44 @@
+# Keep the Cloud Run image lean and reproducible. Anything that varies by
+# developer machine, contains secrets, or holds runtime state stays out.
+
+.git
+.gitignore
+
+# Local venv — the container builds its own from requirements.txt
+tax-grieve-env
+
+# Python caches
+__pycache__
+*.pyc
+.pytest_cache
+*.egg-info
+.mypy_cache
+.ruff_cache
+
+# Local runtime state (DB, generated PDFs) — we don't want to bake whatever
+# was on the developer's laptop into the image. The app calls init_schema()
+# at startup to create a fresh DB.
+*.db
+*.pdf
+
+# Secrets and local config
+.env
+.env.local
+.envrc
+
+# Editor / OS junk
+.vscode
+.idea
+.DS_Store
+
+# Test artifacts
+tests/__pycache__
+test_*.db
+
+# Conductor planning files — useful for repo, not for the running container
+conductor
+docs
+
+# CI / dev tooling
+.github
+node_modules
