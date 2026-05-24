@@ -817,7 +817,8 @@ class TaxGrieveCore:
                         'condition_code', 'bldg_grade', 'basement_type', 'heat_type', 'style', 'property_class',
                     ]
                     cursor.execute(
-                        upsert_sql('sales_comps', _comp_cols, conflict_cols=['target_property_id', 'zpid']),
+                        upsert_sql('sales_comps', _comp_cols, conflict_cols=['target_property_id', 'zpid'],
+                                   conflict_where='zpid IS NOT NULL'),
                         (subject_id, comp_obj['address'], comp_obj['sbl'], comp_obj['sale_price'], comp_obj['sale_date'],
                          comp_obj['sqft'], comp_obj['acreage'], comp_obj['bedrooms'], comp_obj['bathrooms'], comp_obj['year_built'],
                          comp_obj['zpid'], comp_obj['status'], comp_obj.get('assessment_2026', 0), comp_obj.get('assessment_2025', 0), comp_obj.get('distance_miles'),

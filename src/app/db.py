@@ -86,12 +86,17 @@ def is_postgres() -> bool:
     return bool(_database_url())
 
 
-def upsert_sql(table: str, columns: list[str], conflict_cols: list[str]) -> str:
+def upsert_sql(table: str, columns: list[str], conflict_cols: list[str],
+               conflict_where: str | None = None) -> str:
     """Build a portable UPSERT statement.
 
     SQLite: INSERT OR REPLACE (replaces the whole row; we always pass every
         column so this is equivalent to upsert).
-    Postgres: INSERT ... ON CONFLICT (...) DO UPDATE SET col=EXCLUDED.col ...
+    Postgres: INSERT ... ON CONFLICT (...) [WHERE ...] DO UPDATE SET col=EXCLUDED.col ...
+
+    conflict_where: optional predicate that must match the partial unique index
+        definition (e.g. 'zpid IS NOT NULL' for the sales_comps index).
+        Postgres ON CONFLICT must exactly match the index, including its WHERE.
 
     Returns a SQL string with ?-placeholders. Callers using the abstraction's
     cursor will get them translated automatically for Postgres.
@@ -103,9 +108,10 @@ def upsert_sql(table: str, columns: list[str], conflict_cols: list[str]) -> str:
         update_set = ",".join(
             f"{c}=EXCLUDED.{c}" for c in columns if c not in conflict_cols
         )
+        where_clause = f" WHERE {conflict_where}" if conflict_where else ""
         return (
             f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
-            f"ON CONFLICT ({conflict_list}) DO UPDATE SET {update_set}"
+            f"ON CONFLICT ({conflict_list}){where_clause} DO UPDATE SET {update_set}"
         )
     return f"INSERT OR REPLACE INTO {table} ({col_list}) VALUES ({placeholders})"
 
