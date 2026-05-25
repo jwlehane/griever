@@ -413,11 +413,12 @@ class TaxGrieveCore:
             row_id = cursor.lastrowid
         else:
             row_id = row['id']
-            cursor.execute('''UPDATE properties SET
-                                sqft = MAX(sqft, ?),
-                                bedrooms = MAX(bedrooms, ?),
-                                bathrooms = MAX(bathrooms, ?),
-                                year_built = MAX(year_built, ?),
+            max_func = "GREATEST" if is_postgres() else "MAX"
+            cursor.execute(f'''UPDATE properties SET
+                                sqft = {max_func}(sqft, ?),
+                                bedrooms = {max_func}(bedrooms, ?),
+                                bathrooms = {max_func}(bathrooms, ?),
+                                year_built = {max_func}(year_built, ?),
                                 assessment_2025 = COALESCE(NULLIF(?, 0), assessment_2025),
                                 assessment_2026 = COALESCE(NULLIF(?, 0), assessment_2026),
                                 latitude = COALESCE(?, latitude),
