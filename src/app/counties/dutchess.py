@@ -20,6 +20,18 @@ _SUFFIXES = [
     " BOULEVARD", " BLVD",
 ]
 
+_CANONICAL_SUFFIXES = {
+    "STREET": "ST", "ST": "ST",
+    "ROAD": "RD", "RD": "RD",
+    "AVENUE": "AVE", "AVE": "AVE",
+    "DRIVE": "DR", "DR": "DR",
+    "LANE": "LN", "LN": "LN",
+    "COURT": "CT", "CT": "CT",
+    "PLACE": "PL", "PL": "PL",
+    "TURNPIKE": "TPKE", "TPKE": "TPKE",
+    "BOULEVARD": "BLVD", "BLVD": "BLVD",
+}
+
 
 def _get_f(source, key, default=""):
     return source.get(key, source.get(key.lower(), source.get(key.upper(), default)))
@@ -129,6 +141,13 @@ class DutchessCounty(CountyInterface):
             if not swis_options:
                 swis_options = list(self.swis_map.keys())
 
+        # Check if the user specified a suffix to validate
+        expected_suffix = None
+        for suffix in _SUFFIXES:
+            if street_part.upper().endswith(suffix):
+                expected_suffix = _CANONICAL_SUFFIXES.get(suffix.strip())
+                break
+
         print(f"DEBUG: Searching {safe_addr(f'{number} {clean_street}')} in {len(swis_options)} towns...")
 
         for s in swis_options:
@@ -143,6 +162,11 @@ class DutchessCounty(CountyInterface):
                     data = resp.json()
                     if data.get('success') and data.get('data'):
                         res = data['data'][0]
+                        # Suffix verification
+                        res_suff_raw = (res.get('Loc_mail_st_suff') or res.get('loc_mail_st_suff') or '').strip().upper()
+                        res_suff = _CANONICAL_SUFFIXES.get(res_suff_raw, res_suff_raw)
+                        if expected_suffix and res_suff and res_suff != expected_suffix:
+                            continue
                         # Ensure key consistency
                         if 'parcelgrid' not in res and 'id' in res: res['parcelgrid'] = res['id']
                         print(f"  FOUND in {town_name}")
@@ -159,6 +183,11 @@ class DutchessCounty(CountyInterface):
                         data = resp.json()
                         if data.get('success') and data.get('data'):
                             res = data['data'][0]
+                            # Suffix verification
+                            res_suff_raw = (res.get('Loc_mail_st_suff') or res.get('loc_mail_st_suff') or '').strip().upper()
+                            res_suff = _CANONICAL_SUFFIXES.get(res_suff_raw, res_suff_raw)
+                            if expected_suffix and res_suff and res_suff != expected_suffix:
+                                continue
                             if 'parcelgrid' not in res and 'id' in res: res['parcelgrid'] = res['id']
                             print(f"  FOUND in {town_name} (no predir)")
                             return res
@@ -186,14 +215,28 @@ class DutchessCounty(CountyInterface):
             if name.upper() in raw_input:
                 swis_options.append(code)
 
+        # Check if the user specified a suffix to validate
+        expected_suffix = None
+        for suffix in _SUFFIXES:
+            if street_part.upper().endswith(suffix):
+                expected_suffix = _CANONICAL_SUFFIXES.get(suffix.strip())
+                break
+
         # Avoid autocomplete fan-out across every Dutchess municipality while
-        # the user is still typing. Census fallback covers no-town queries.
+        # the user is still typing, unless the street part is long enough
+        # (at least 4 chars) to search in parallel across all towns.
         if not swis_options:
-            return []
+            if len(street_part) < 4:
+                return []
+            swis_options = list(self.swis_map.keys())
 
         suggestions = []
         seen = set()
-        for swis in swis_options:
+
+        import concurrent.futures
+
+        def query_town(swis):
+            town_suggestions = []
             for street in street_options:
                 attempts = [{'number': number, 'street': street.strip(), 'predir': predir, 'swis': swis}]
                 if predir:
@@ -204,7 +247,7 @@ class DutchessCounty(CountyInterface):
                             f"{API_BASE_URL}/search_extract_addresses.asp",
                             params=params,
                             headers=self.headers,
-                            timeout=4,
+                            timeout=3,
                         )
                         resp.raise_for_status()
                         payload = resp.json()
@@ -214,16 +257,19 @@ class DutchessCounty(CountyInterface):
 
                     for row in rows:
                         parcelgrid = row.get('parcelgrid') or row.get('id')
-                        if not parcelgrid or parcelgrid in seen:
+                        if not parcelgrid:
                             continue
-                        seen.add(parcelgrid)
-                        if 'parcelgrid' not in row:
-                            row['parcelgrid'] = parcelgrid
+                        
+                        # Suffix verification
+                        res_suff_raw = (row.get('Loc_mail_st_suff') or row.get('loc_mail_st_suff') or '').strip().upper()
+                        res_suff = _CANONICAL_SUFFIXES.get(res_suff_raw, res_suff_raw)
+                        if expected_suffix and res_suff and res_suff != expected_suffix:
+                            continue
 
                         addr = self._format_search_address(row)
                         town = (_get_f(row, 'loc_muni_name') or _get_f(row, 'muni_name') or self.swis_map.get(str(_get_f(row, 'swis')), "")).title()
                         zipc = str(_get_f(row, 'loc_zip') or _get_f(row, 'zip') or "").strip()[:5]
-                        suggestions.append({
+                        town_suggestions.append({
                             "address": addr,
                             "town": town,
                             "county": "Dutchess",
@@ -232,8 +278,31 @@ class DutchessCounty(CountyInterface):
                             "sbl": parcelgrid,
                             "swis": str(_get_f(row, 'swis') or parcelgrid[:6]),
                         })
+                    if town_suggestions:
+                        break  # Found match for this street option, stop trying other options for this town
+            return town_suggestions
+
+        if len(swis_options) > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(swis_options), 20)) as executor:
+                futures = [executor.submit(query_town, swis) for swis in swis_options]
+                for future in concurrent.futures.as_completed(futures):
+                    for item in future.result():
+                        pg = item['parcelgrid']
+                        if pg not in seen:
+                            seen.add(pg)
+                            suggestions.append(item)
+                            if len(suggestions) >= limit:
+                                return suggestions
+        else:
+            for swis in swis_options:
+                for item in query_town(swis):
+                    pg = item['parcelgrid']
+                    if pg not in seen:
+                        seen.add(pg)
+                        suggestions.append(item)
                         if len(suggestions) >= limit:
                             return suggestions
+
         return suggestions
 
     def _format_search_address(self, row: dict) -> str:
