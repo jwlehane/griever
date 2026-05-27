@@ -615,7 +615,8 @@
                         if (done) {
                             const statusEl = document.getElementById('status-msg');
                             if (statusEl && !window.__curationRendered) {
-                                if (!statusEl.innerHTML.includes('Error Occurred')) {
+                                const statusText = statusEl.innerHTML.toLowerCase();
+                                if (!statusText.includes('error') && !statusText.includes('no qualified comps')) {
                                     statusEl.innerHTML = "Stream completed but UI did not load. Please check logs or try again.";
                                 }
                                 setOptionalDisplay('stop-btn', 'none');
