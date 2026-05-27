@@ -245,7 +245,7 @@ def test_forced_verification_rejects_broad_fallback_address_mismatch(tmp_path, m
         orpts_client.return_value.get_municipal_rates.return_value = {'rar': 100.0}
         events = list(core.discover_comps_live(subject, subject_id, force_verify=True))
 
-    assert [event for event in events if event.get('status') == 'verified'] == []
+    assert [event for event in events if event.get('status') == 'verified' and event.get('comp', {}).get('status') != 'REJECTED'] == []
     assert any(
         event.get('status') == 'resuming' and 'County verification failed' in event.get('message', '')
         for event in events

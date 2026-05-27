@@ -38,6 +38,9 @@ class TaxGrieveCore:
         intentionally and the UI/server still enforce at least three selected
         comps before a final report.
         """
+        if (comp or {}).get('is_selected'):
+            return True
+
         status = (comp or {}).get('status')
         status = str(status or '').upper()
         if status == 'REJECTED':
@@ -790,22 +793,34 @@ class TaxGrieveCore:
                     # Enforce Hard Filters
                     passes, reason = self._passes_hard_filters(subject, comp_obj, valuation_date=valuation_date)
                     if not passes:
+                        comp_obj['status'] = 'REJECTED'
+                        comp_obj['rejection_reason'] = f"Hard Filter: {reason}"
+                        comp_obj['similarity_score'] = self.calculate_similarity(
+                            subject, comp_obj, rar=rar, valuation_date=valuation_date
+                        )
+                        comp_obj['grade'] = self.calculate_similarity_grade(
+                            subject, comp_obj, rar=rar, valuation_date=valuation_date
+                        )
+                        comp_obj['is_selected'] = 0
                         yield {"status": "resuming", "message": f"Rejected by Hard Filter: {reason} ({comp_obj['address']})"}
-                        continue
+                    else:
+                        # Calculate Grade & Score immediately
+                        comp_obj['similarity_score'] = self.calculate_similarity(
+                            subject, comp_obj, rar=rar, valuation_date=valuation_date
+                        )
+                        comp_obj['grade'] = self.calculate_similarity_grade(
+                            subject, comp_obj, rar=rar, valuation_date=valuation_date
+                        )
+                        comp_obj['is_selected'] = 0 # Default to unselected for human review
 
-                    # Calculate Grade & Score immediately
-                    comp_obj['similarity_score'] = self.calculate_similarity(
-                        subject, comp_obj, rar=rar, valuation_date=valuation_date
-                    )
-                    comp_obj['grade'] = self.calculate_similarity_grade(
-                        subject, comp_obj, rar=rar, valuation_date=valuation_date
-                    )
-                    comp_obj['is_selected'] = 0 # Default to unselected for human review
-
-                    if not self.is_defensible_comp(comp_obj):
-                        reason = self.quality_rejection_reason(comp_obj)
-                        yield {"status": "resuming", "message": f"Rejected by Quality Gate: {reason} ({comp_obj['address']})"}
-                        continue
+                        if not self.is_defensible_comp(comp_obj):
+                            reason = self.quality_rejection_reason(comp_obj)
+                            comp_obj['status'] = 'REJECTED'
+                            comp_obj['rejection_reason'] = f"Quality Gate: {reason}"
+                            yield {"status": "resuming", "message": f"Rejected by Quality Gate: {reason} ({comp_obj['address']})"}
+                        else:
+                            # Keep original status (VERIFIED / UNVERIFIED)
+                            comp_obj['rejection_reason'] = None
 
                     # distance_miles column existence is guaranteed by
                     # init_schema()/the earlier legacy migration block, so
@@ -815,6 +830,7 @@ class TaxGrieveCore:
                         'bedrooms', 'bathrooms', 'year_built', 'zpid', 'status', 'assessment_2026', 'assessment_2025',
                         'distance_miles', 'grade', 'similarity_score', 'is_selected',
                         'condition_code', 'bldg_grade', 'basement_type', 'heat_type', 'style', 'property_class',
+                        'rejection_reason',
                     ]
                     cursor.execute(
                         upsert_sql('sales_comps', _comp_cols, conflict_cols=['target_property_id', 'zpid'],
@@ -824,7 +840,8 @@ class TaxGrieveCore:
                          comp_obj['zpid'], comp_obj['status'], comp_obj.get('assessment_2026', 0), comp_obj.get('assessment_2025', 0), comp_obj.get('distance_miles'),
                          comp_obj['grade'], comp_obj['similarity_score'], comp_obj['is_selected'],
                          comp_obj.get('condition_code', ''), comp_obj.get('grade', ''), comp_obj.get('basement_type', ''),
-                         comp_obj.get('heat_type', ''), comp_obj.get('style', ''), comp_obj.get('property_class', '')))
+                         comp_obj.get('heat_type', ''), comp_obj.get('style', ''), comp_obj.get('property_class', ''),
+                         comp_obj.get('rejection_reason')))
                     conn.commit()
                     enriched_comps.append(comp_obj)
                     yield {"status": "verified", "comp": comp_obj}
@@ -1201,14 +1218,8 @@ class TaxGrieveCore:
                 rar = 100.0
 
         raw_results = []
+        math_comps = []
         for comp in comps:
-            if comp.get('status') == 'REJECTED':
-                continue
-            
-            # PHASE 2 ENFORCEMENT: If enforcing selection, skip unselected comps
-            if enforce_selection and not comp.get('is_selected'):
-                continue
-
             adj_price = get_val(comp, 'sale_price', 0)
             if adj_price == 0:
                 continue
@@ -1257,7 +1268,7 @@ class TaxGrieveCore:
                     subject, comp, renovation_year=renovation_year, rar=rar, valuation_date=valuation_date
                 )
 
-                raw_results.append({
+                comp_result = {
                     'address': comp['address'], 'sale_price': comp['sale_price'],
                     'reconciled_value': reconciled, 'similarity_score': score,
                     'grade': grade,
@@ -1281,7 +1292,18 @@ class TaxGrieveCore:
                     'sale_date': comp.get('sale_date'),
                     'is_outlier': False,
                     'used': False,
-                })
+                    'rejection_reason': comp.get('rejection_reason'),
+                }
+                raw_results.append(comp_result)
+
+                is_rejected = comp_result['status'] == 'REJECTED'
+                is_selected = comp_result['is_selected']
+                if enforce_selection:
+                    if is_selected:
+                        math_comps.append(comp_result)
+                else:
+                    if not is_rejected or is_selected:
+                        math_comps.append(comp_result)
             except Exception as e:
                 print(f"Skipping comp {safe_addr(comp.get('address'))} in valuation due to error: {e}")
 
@@ -1292,8 +1314,18 @@ class TaxGrieveCore:
                 "adjustments_used": adjs,
             }
 
+        if not math_comps:
+            for r in raw_results:
+                if r.get('status') == 'REJECTED' and not r.get('is_selected'):
+                    r['is_outlier'] = True
+            return {
+                "market_value": 0, "range_low": 0, "range_high": 0,
+                "comps": raw_results, "used_count": 0, "considered_count": len(raw_results),
+                "adjustments_used": adjs,
+            }
+
         # Median + 1.5×IQR (Tukey fence) outlier filter on reconciled_value.
-        vals = sorted(r['reconciled_value'] for r in raw_results)
+        vals = sorted(r['reconciled_value'] for r in math_comps)
         n = len(vals)
         def _quantile(sorted_vals, q):
             if not sorted_vals:
@@ -1308,18 +1340,19 @@ class TaxGrieveCore:
         iqr = q3 - q1
         lo_fence = q1 - 1.5 * iqr
         hi_fence = q3 + 1.5 * iqr
-        for r in raw_results:
+        for r in math_comps:
             if enforce_selection:
                 r['is_outlier'] = False
             else:
                 r['is_outlier'] = not (lo_fence <= r['reconciled_value'] <= hi_fence)
 
-        # Best-N: take top-N by similarity_score among non-outliers; if too few
-        # survive the outlier filter, fall back to the top-N by similarity
-        # ignoring the filter so we never return zero results.
-        kept = [r for r in raw_results if not r['is_outlier']]
+        for r in raw_results:
+            if r.get('status') == 'REJECTED' and not r.get('is_selected'):
+                r['is_outlier'] = True
+
+        kept = [r for r in math_comps if not r['is_outlier']]
         if len(kept) < min(3, n):
-            kept = list(raw_results)
+            kept = list(math_comps)
         kept.sort(key=lambda r: r['similarity_score'], reverse=True)
         
         if enforce_selection:
@@ -1354,7 +1387,8 @@ class TaxGrieveCore:
         
         # Check limit
         cursor.execute("SELECT COUNT(*) FROM sales_comps WHERE target_property_id = ? AND status = 'MANUAL'", (property_id,))
-        count = cursor.fetchone()[0]
+        row = cursor.fetchone()
+        count = list(row.values())[0] if hasattr(row, 'values') else (row[0] if row else 0)
         if count >= 5:
             conn.close()
             return False, "Maximum of 5 manual comps allowed."

@@ -75,6 +75,11 @@
         .btn-select { background: #e0e0e0; color: #333; }
         .btn-select.selected { background: #27ae60; color: white; }
         .btn-reject { background: var(--danger); color: white; }
+        .btn-restore { background: #e67e22; color: white; }
+        .btn-restore:hover { background: #d35400; }
+        tr.rejected-row { background-color: #faf5f5; opacity: 0.85; border-left: 4px solid var(--danger); }
+        tr.rejected-row:hover { opacity: 1; }
+        .rejection-notice { margin-top: 5px; color: var(--danger); font-size: 11px; font-weight: bold; display: block; }
         .btn-finalize { width: 100%; min-height: 50px; padding: 14px; background: var(--accent); color: white; font-size: 17px; margin-top: 10px; }
         .btn-finalize:hover { background: #1c4962; }
         .btn-finalize:disabled { background: #9eaba8; cursor: not-allowed; }
@@ -216,7 +221,7 @@
             </thead>
             <tbody>
                 {% for comp in comps %}
-                <tr id="row-{{ loop.index }}" data-outlier="{{ 'true' if comp.is_outlier else 'false' }}" data-score="{{ comp.similarity_score }}">
+                <tr id="row-{{ loop.index }}" class="{% if comp.status == 'REJECTED' %}rejected-row{% endif %}" data-outlier="{{ 'true' if comp.is_outlier else 'false' }}" data-score="{{ comp.similarity_score }}">
                     <td data-label="Match" title="Grade combines match quality and price-per-square-foot advantage against the subject's assessed market value.">
                         <span class="grade grade-{{ comp.grade }}">{{ comp.grade }}</span><br>
                         <small class="grade-label">
@@ -243,7 +248,13 @@
                         </details>
                         {% endif %}
                     </td>
-                    <td data-label="Address"><b>{{ comp.address }}</b><br><small>{{ comp.distance_miles }} miles away</small></td>
+                    <td data-label="Address">
+                        <b>{{ comp.address }}</b><br>
+                        <small>{{ comp.distance_miles }} miles away</small>
+                        <span id="rej-reason-{{ loop.index }}" class="rejection-notice" style="{% if comp.status != 'REJECTED' %}display: none;{% endif %}">
+                            🚫 Rejected: <span class="reason-text">{{ comp.rejection_reason or '' }}</span>
+                        </span>
+                    </td>
                     <td data-label="Sale">${{ "{:,.0f}".format(comp.sale_price) }}<br><small>{{ comp.sale_date }}</small></td>
                     <td data-label="Specs"><small>{{ comp.sqft }} sqft<br>{{ comp.bedrooms }}bd/{{ comp.bathrooms }}ba, Blt {{ comp.year_built }}</small></td>
                     <td data-label="Adjusted">
@@ -267,7 +278,8 @@
                             <button type="button" class="btn-select {% if comp.is_selected %}selected{% endif %}" id="sel-{{ loop.index }}" onclick='toggleSelect({{ loop.index }}, {{ subject_id }}, {{ (comp.zpid or '')|tojson }}, {{ comp.address|tojson }})'>
                                 {{ 'Selected' if comp.is_selected else 'Select' }}
                             </button>
-                            <button type="button" class="btn-reject" onclick='openRejectModal({{ loop.index }}, {{ subject_id }}, {{ (comp.zpid or '')|tojson }}, {{ comp.address|tojson }})'>Reject</button>
+                            <button type="button" class="btn-reject" id="rej-btn-{{ loop.index }}" style="{% if comp.status == 'REJECTED' %}display: none;{% endif %}" onclick='openRejectModal({{ loop.index }}, {{ subject_id }}, {{ (comp.zpid or '')|tojson }}, {{ comp.address|tojson }})'>Reject</button>
+                            <button type="button" class="btn-restore" id="rest-btn-{{ loop.index }}" style="{% if comp.status != 'REJECTED' %}display: none;{% endif %}" onclick='restoreComp({{ loop.index }}, {{ subject_id }}, {{ (comp.zpid or '')|tojson }}, {{ comp.address|tojson }})'>Restore</button>
                         </div>
                     </td>
                 </tr>
@@ -391,21 +403,69 @@
 
         function confirmReject() {
             const idx = document.getElementById('rejRow').value;
-            const formData = new FormData();
-            formData.append('property_id', document.getElementById('rejSubjId').value);
-            formData.append('address', document.getElementById('rejAddr').value);
+            const propertyId = document.getElementById('rejSubjId').value;
+            const address = document.getElementById('rejAddr').value;
             const zpid = document.getElementById('rejZpid').value;
+            const reason = document.getElementById('rejectReason').value;
+
+            const formData = new FormData();
+            formData.append('property_id', propertyId);
+            formData.append('address', address);
             if (zpid && zpid !== 'None') formData.append('zpid', zpid);
-            formData.append('reason', document.getElementById('rejectReason').value);
+            formData.append('reason', reason);
 
             fetch('/reject_comp', { method: 'POST', body: formData })
                 .then(r => r.json())
                 .then(data => {
                     if(data.status === 'success') {
-                        document.getElementById(`row-${idx}`).style.display = 'none';
+                        const row = document.getElementById(`row-${idx}`);
+                        row.classList.add('rejected-row');
+                        
+                        const selBtn = document.getElementById(`sel-${idx}`);
+                        if (selBtn.classList.contains('selected')) {
+                            selBtn.classList.remove('selected');
+                            selBtn.innerText = 'Select';
+                        }
+                        
+                        document.getElementById(`rej-btn-${idx}`).style.display = 'none';
+                        document.getElementById(`rest-btn-${idx}`).style.display = 'inline-block';
+                        
+                        const reasonSpan = document.getElementById(`rej-reason-${idx}`);
+                        reasonSpan.querySelector('.reason-text').innerText = reason;
+                        reasonSpan.style.display = 'block';
+
                         document.getElementById('rejectModal').style.display = 'none';
                         updateSelectionSummary();
                     }
+                });
+        }
+
+        function restoreComp(idx, subjectId, zpid, address) {
+            const formData = new FormData();
+            formData.append('property_id', subjectId);
+            if (zpid && zpid !== 'None') formData.append('zpid', zpid);
+            formData.append('address', address);
+
+            const restBtn = document.getElementById(`rest-btn-${idx}`);
+            restBtn.disabled = true;
+
+            fetch('/restore_comp', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const row = document.getElementById(`row-${idx}`);
+                        row.classList.remove('rejected-row');
+                        
+                        document.getElementById(`rej-reason-${idx}`).style.display = 'none';
+                        
+                        document.getElementById(`rej-btn-${idx}`).style.display = 'inline-block';
+                        document.getElementById(`rest-btn-${idx}`).style.display = 'none';
+                        
+                        updateSelectionSummary();
+                    }
+                })
+                .finally(() => {
+                    restBtn.disabled = false;
                 });
         }
 

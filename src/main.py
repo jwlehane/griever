@@ -321,18 +321,22 @@ async def generate_report(
                 return HTMLResponse("Property not found in database.", status_code=404)
             subject = dict(row)
             
-            cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED'" + (" AND is_selected = 1" if init_finalize else ""), (active_subject_id,))
-            comps = core.filter_defensible_comps([dict(r) for r in cursor.fetchall()])
+            cursor = conn.cursor()
+            if init_finalize:
+                cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND is_selected = 1", (active_subject_id,))
+            else:
+                cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ?", (active_subject_id,))
+            all_comps = [dict(row) for row in cursor.fetchall()]
             conn.close()
 
-            if not comps:
+            if not all_comps:
                 return HTMLResponse("No comps found or selected.", status_code=400)
 
             condition_factors = {"below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20}
             condition_factor = condition_factors.get((init_condition or "average").lower(), 1.0)
 
             valuation = core.calculate_valuation(
-                subject, comps,
+                subject, all_comps,
                 renovation_year=init_renov,
                 condition_factor=condition_factor,
                 enforce_selection=init_finalize
@@ -345,7 +349,7 @@ async def generate_report(
                 )
             
             if init_update_curation:
-                sorted_comps = sorted([c for c in valuation["comps"] if c.get('status') != 'REJECTED'], key=lambda x: x.get('similarity_score', 0), reverse=True)
+                sorted_comps = sorted(valuation["comps"], key=lambda x: x.get('similarity_score', 0), reverse=True)
                 html_content = templates.get_template("curation.html").render({
                     "request": request,
                     "subject": subject,
@@ -429,26 +433,25 @@ async def generate_report(
 
             conn = get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED'", (active_subject_id,))
+            cursor.execute("SELECT * FROM sales_comps WHERE target_property_id = ?", (active_subject_id,))
             all_comps = [dict(row) for row in cursor.fetchall()]
-            comps = core.filter_defensible_comps(all_comps)
             conn.close()
 
-            if not comps:
-                yield f"data: {json.dumps({'status': 'no_comps', 'message': 'No defensible comparable sales found automatically. Add manual comps or broaden the search.', 'subject_id': active_subject_id})}\n\n"
+            if not all_comps:
+                yield f"data: {json.dumps({'status': 'no_comps', 'message': 'No comparable sales found. Add manual comps or broaden the search.', 'subject_id': active_subject_id})}\n\n"
                 return
 
             condition_factors = {"below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20}
             condition_factor = condition_factors.get((init_condition or "average").lower(), 1.0)
 
             valuation = core.calculate_valuation(
-                subject, comps,
+                subject, all_comps,
                 renovation_year=init_renov,
                 condition_factor=condition_factor,
                 enforce_selection=False
             )
 
-            sorted_comps = sorted([c for c in valuation["comps"] if c.get('status') != 'REJECTED'], key=lambda x: x.get('similarity_score', 0), reverse=True)
+            sorted_comps = sorted(valuation["comps"], key=lambda x: x.get('similarity_score', 0), reverse=True)
 
             html_content = templates.get_template("curation.html").render({
                 "request": request,
@@ -514,10 +517,10 @@ def _build_report_context(subject_id: int, renovation_year: int = None, conditio
     subject = dict(row)
     # FOR PDF: We only use SELECTED comps
     cursor.execute(
-        "SELECT * FROM sales_comps WHERE target_property_id = ? AND status != 'REJECTED' AND is_selected = 1",
+        "SELECT * FROM sales_comps WHERE target_property_id = ? AND is_selected = 1",
         (subject_id,),
     )
-    comps = core.filter_defensible_comps([dict(r) for r in cursor.fetchall()])
+    comps = [dict(r) for r in cursor.fetchall()]
     conn.close()
 
     condition_factors = {"below": 0.85, "average": 1.00, "above": 1.10, "renovated": 1.20}
@@ -787,6 +790,29 @@ async def reject_comp(request: Request, property_id: int = Form(...), address: s
         cursor.execute("UPDATE sales_comps SET status = 'REJECTED', rejection_reason = ? WHERE target_property_id = ? AND zpid = ?", (reason, property_id, zpid))
     else:
         cursor.execute("UPDATE sales_comps SET status = 'REJECTED', rejection_reason = ? WHERE target_property_id = ? AND address = ?", (reason, property_id, address))
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
+
+
+@app.post("/restore_comp")
+async def restore_comp(property_id: int = Form(...), zpid: str = Form(None), address: str = Form(None)):
+    conn = get_connection()
+    cursor = conn.cursor()
+    if zpid:
+        cursor.execute("""
+            UPDATE sales_comps 
+            SET status = CASE WHEN sbl = 'UNVERIFIED' THEN 'UNVERIFIED' ELSE 'VERIFIED' END, 
+                rejection_reason = NULL 
+            WHERE target_property_id = ? AND zpid = ?
+        """, (property_id, zpid))
+    else:
+        cursor.execute("""
+            UPDATE sales_comps 
+            SET status = CASE WHEN sbl = 'UNVERIFIED' THEN 'UNVERIFIED' ELSE 'VERIFIED' END, 
+                rejection_reason = NULL 
+            WHERE target_property_id = ? AND address = ?
+        """, (property_id, address))
     conn.commit()
     conn.close()
     return {"status": "success"}

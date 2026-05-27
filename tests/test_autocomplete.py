@@ -50,3 +50,25 @@ def test_dutchess_street_parts_try_compacted_multitoken_names():
         "HILL TOP",
         "HILLTOP",
     ]
+
+
+def test_dutchess_street_parts_does_not_abbreviate_south_street():
+    predir, options = _clean_street_parts("South Street")
+
+    assert predir == ""
+    assert options == [
+        "SOUTH STREET",
+        "SOUTH",
+    ]
+
+
+def test_dutchess_street_parts_abbreviates_south_parsonage_street():
+    predir, options = _clean_street_parts("South Parsonage Street")
+
+    assert predir == "S"
+    assert options == [
+        "S PARSONAGE STREET",
+        "S PARSONAGE",
+        "PARSONAGE",
+    ]
+

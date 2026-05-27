@@ -199,3 +199,83 @@ def test_address_verification_rejects_wrong_parcel_address(input_address, offici
     core = TaxGrieveCore(db_path=':memory:')
 
     assert not core._addresses_match_for_verification(input_address, official_address)
+
+
+def test_rejected_comp_override():
+    core = TaxGrieveCore(db_path=':memory:')
+
+    # 1. Test is_defensible_comp with status='REJECTED'
+    rejected_comp = {
+        'status': 'REJECTED',
+        'is_selected': 0,
+        'grade': 'F',
+        'similarity_score': 30.0,
+    }
+    assert not core.is_defensible_comp(rejected_comp)
+
+    overridden_comp = {
+        'status': 'REJECTED',
+        'is_selected': 1,
+        'grade': 'F',
+        'similarity_score': 30.0,
+    }
+    assert core.is_defensible_comp(overridden_comp)
+
+    # 2. Test calculate_valuation logic with rejected comps
+    subject = {
+        'address': '123 Main St',
+        'sqft': 1500,
+        'year_built': 2000,
+        'bedrooms': 3,
+        'bathrooms': 2,
+    }
+    
+    from unittest.mock import patch
+    with patch('app.adjustments.get_adjustments') as mock_adj:
+        mock_adj.return_value = {}
+        
+        comp_rejected_unselected = {
+            'address': '200 Main St',
+            'sale_price': 300000,
+            'sale_date': '2025-06-01',
+            'sqft': 1500,
+            'year_built': 2000,
+            'bedrooms': 3,
+            'bathrooms': 2,
+            'status': 'REJECTED',
+            'is_selected': 0,
+        }
+        comp_rejected_selected = {
+            'address': '202 Main St',
+            'sale_price': 400000,
+            'sale_date': '2025-06-01',
+            'sqft': 1500,
+            'year_built': 2000,
+            'bedrooms': 3,
+            'bathrooms': 2,
+            'status': 'REJECTED',
+            'is_selected': 1,
+        }
+        comp_verified = {
+            'address': '204 Main St',
+            'sale_price': 500000,
+            'sale_date': '2025-06-01',
+            'sqft': 1500,
+            'year_built': 2000,
+            'bedrooms': 3,
+            'bathrooms': 2,
+            'status': 'VERIFIED',
+            'is_selected': 1,
+        }
+        
+        res = core.calculate_valuation(
+            subject, 
+            [comp_rejected_unselected, comp_rejected_selected, comp_verified],
+            best_n=2,
+            enforce_selection=True
+        )
+        assert res["used_count"] == 2
+        addresses_used = [c['address'] for c in res["comps"] if c.get('used')]
+        assert '202 Main St' in addresses_used
+        assert '204 Main St' in addresses_used
+        assert '200 Main St' not in addresses_used

@@ -27,32 +27,48 @@ def _get_f(source, key, default=""):
 
 def _clean_street_parts(street_part: str):
     clean_street = re.sub(r"\s+", " ", (street_part or "").upper().strip())
-    for word, abbr in _DIRECTION_WORDS.items():
-        if clean_street.startswith(f"{word} "):
-            clean_street = clean_street.replace(f"{word} ", f"{abbr} ", 1)
-            break
-
+    
+    # 1. Strip suffix first
     street_base = clean_street
+    suffix_found = None
     for suffix in _SUFFIXES:
         if clean_street.endswith(suffix):
             street_base = clean_street[:len(clean_street)-len(suffix)].strip()
+            suffix_found = suffix
             break
 
+    # 2. Extract and replace direction prefix if it is followed by a space
     predir = ""
     street_no_dir = street_base
-    if street_base.startswith(("N ", "S ", "E ", "W ")):
-        predir, street_no_dir = street_base[0], street_base[2:]
+    for word, abbr in _DIRECTION_WORDS.items():
+        if street_base.startswith(f"{word} "):
+            street_no_dir = street_base[len(word) + 1:].strip()
+            predir = abbr
+            break
+        elif street_base.startswith(f"{abbr} "):
+            street_no_dir = street_base[2:].strip()
+            predir = abbr
+            break
+
+    # 3. Reconstruct cleaned forms
+    if predir:
+        street_base = f"{predir} {street_no_dir}"
+        clean_street = f"{street_base}{suffix_found}" if suffix_found else street_base
+    else:
+        street_base = street_no_dir
+        clean_street = f"{street_base}{suffix_found}" if suffix_found else street_base
 
     street_options = [clean_street, street_base]
     if street_no_dir != street_base:
         street_options.append(street_no_dir)
-    compact_source = street_no_dir if street_no_dir != street_base else street_base
+    compact_source = street_no_dir
     compact = compact_source.replace(" ", "")
     if len(compact_source.split()) > 1 and compact:
         street_options.append(compact)
 
     seen = set()
     return predir, [x for x in street_options if x and not (x in seen or seen.add(x))]
+
 
 
 class DutchessCounty(CountyInterface):
