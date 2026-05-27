@@ -1,12 +1,14 @@
 import sys
 import os
 import pytest
+import sqlite3
 from unittest.mock import MagicMock, patch
 
 # Add src to path so we can import app.core
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from app.core import MarketDataSourceError, TaxGrieveCore
+from app.db import init_schema, SQLiteConnection
 
 def test_valuation_math_basic():
     """Verify that valuation math returns consistent results when no adjustments are needed."""
@@ -279,3 +281,68 @@ def test_rejected_comp_override():
         assert '202 Main St' in addresses_used
         assert '204 Main St' in addresses_used
         assert '200 Main St' not in addresses_used
+
+
+def test_restore_comp_preserves_rejection_reason():
+    # Setup temporary test database
+    db_path = 'test_restore_comp.db'
+    if os.path.exists(db_path):
+        os.remove(db_path)
+    init_schema(sqlite_path=db_path)
+
+    # Insert test data: one manual comp (zpid=NULL) and one discovered comp (zpid='zpid-123')
+    # both marked as REJECTED with a rejection reason.
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, zpid, status, rejection_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (1, '100 Main St', '1350890000000000000000', 300000, '2025-06-01', 1500, 0.5, 3, 2, 2000, 'zpid-123', 'REJECTED', 'Too small'))
+    
+    cursor.execute("""
+        INSERT INTO sales_comps (target_property_id, address, sbl, sale_price, sale_date, sqft, acreage, bedrooms, bathrooms, year_built, zpid, status, rejection_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (1, '200 Main St', '1350890000000000000000', 400000, '2025-06-01', 1800, 0.6, 4, 2.5, 2005, None, 'REJECTED', 'Different block'))
+    conn.commit()
+    conn.close()
+
+    # Define a mock get_connection that returns SQLiteConnection for our test DB
+    def mock_get_conn():
+        c = sqlite3.connect(db_path)
+        c.row_factory = sqlite3.Row
+        return SQLiteConnection(c)
+
+    # Import main and execute restore_comp
+    from main import restore_comp
+    import asyncio
+
+    # Call restore_comp for discovered comp (zpid='zpid-123')
+    with patch('main.get_connection', side_effect=mock_get_conn):
+        loop = asyncio.get_event_loop()
+        res_disc = loop.run_until_complete(restore_comp(property_id=1, zpid='zpid-123', address='100 Main St'))
+        assert res_disc == {"status": "success"}
+
+        # Call restore_comp for manual comp (zpid=None)
+        res_man = loop.run_until_complete(restore_comp(property_id=1, zpid=None, address='200 Main St'))
+        assert res_man == {"status": "success"}
+
+    # Verify database state
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Check discovered comp: status should be 'VERIFIED', rejection_reason should still be 'Too small'
+    cursor.execute("SELECT status, rejection_reason FROM sales_comps WHERE target_property_id = 1 AND zpid = 'zpid-123'")
+    row_disc = cursor.fetchone()
+    assert row_disc['status'] == 'VERIFIED'
+    assert row_disc['rejection_reason'] == 'Too small'
+
+    # Check manual comp: status should be 'MANUAL', rejection_reason should still be 'Different block'
+    cursor.execute("SELECT status, rejection_reason FROM sales_comps WHERE target_property_id = 1 AND address = '200 Main St'")
+    row_man = cursor.fetchone()
+    assert row_man['status'] == 'MANUAL'
+    assert row_man['rejection_reason'] == 'Different block'
+
+    conn.close()
+    if os.path.exists(db_path):
+        os.remove(db_path)

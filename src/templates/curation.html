@@ -252,8 +252,9 @@
                     <td data-label="Address">
                         <b>{{ comp.address }}</b><br>
                         <small>{{ comp.distance_miles }} miles away</small>
-                        <span id="rej-reason-{{ loop.index }}" class="rejection-notice" style="{% if comp.status != 'REJECTED' %}display: none;{% endif %}">
-                            🚫 Rejected: <span class="reason-text">{{ comp.rejection_reason or '' }}</span>
+                        <span id="rej-reason-{{ loop.index }}" class="rejection-notice" style="{% if not comp.rejection_reason %}display: none;{% endif %}; {% if comp.status != 'REJECTED' %}color: var(--muted);{% endif %}">
+                            <span class="reason-prefix">{% if comp.status == 'REJECTED' %}🚫 Rejected:{% else %}⚠️ Previously rejected:{% endif %}</span>
+                            <span class="reason-text">{{ comp.rejection_reason or '' }}</span>
                         </span>
                     </td>
                     <td data-label="Sale">${{ "{:,.0f}".format(comp.sale_price) }}<br><small>{{ comp.sale_date }}</small></td>
@@ -276,7 +277,7 @@
                     </td>
                     <td data-label="Action">
                         <div class="action-cell">
-                            <button type="button" class="btn-select {% if comp.is_selected %}selected{% endif %}" id="sel-{{ loop.index }}" onclick='toggleSelect({{ loop.index }}, {{ subject_id }}, {{ (comp.zpid or '')|tojson }}, {{ comp.address|tojson }})'>
+                            <button type="button" class="btn-select {% if comp.is_selected %}selected{% endif %}" id="sel-{{ loop.index }}" onclick='toggleSelect({{ loop.index }}, {{ subject_id }}, {{ (comp.zpid or '')|tojson }}, {{ comp.address|tojson }})' {% if comp.status == 'REJECTED' %}disabled{% endif %}>
                                 {{ 'Selected' if comp.is_selected else 'Select' }}
                             </button>
                             <button type="button" class="btn-reject" id="rej-btn-{{ loop.index }}" style="{% if comp.status == 'REJECTED' %}display: none;{% endif %}" onclick='openRejectModal({{ loop.index }}, {{ subject_id }}, {{ (comp.zpid or '')|tojson }}, {{ comp.address|tojson }})'>Reject</button>
@@ -423,6 +424,7 @@
                         row.classList.add('rejected-row');
                         
                         const selBtn = document.getElementById(`sel-${idx}`);
+                        selBtn.disabled = true;
                         if (selBtn.classList.contains('selected')) {
                             selBtn.classList.remove('selected');
                             selBtn.innerText = 'Select';
@@ -432,7 +434,9 @@
                         document.getElementById(`rest-btn-${idx}`).style.display = 'inline-block';
                         
                         const reasonSpan = document.getElementById(`rej-reason-${idx}`);
+                        reasonSpan.querySelector('.reason-prefix').innerText = '🚫 Rejected:';
                         reasonSpan.querySelector('.reason-text').innerText = reason;
+                        reasonSpan.style.color = 'var(--danger)';
                         reasonSpan.style.display = 'block';
 
                         document.getElementById('rejectModal').style.display = 'none';
@@ -457,10 +461,16 @@
                         const row = document.getElementById(`row-${idx}`);
                         row.classList.remove('rejected-row');
                         
-                        document.getElementById(`rej-reason-${idx}`).style.display = 'none';
+                        const selBtn = document.getElementById(`sel-${idx}`);
+                        selBtn.disabled = false;
                         
                         document.getElementById(`rej-btn-${idx}`).style.display = 'inline-block';
                         document.getElementById(`rest-btn-${idx}`).style.display = 'none';
+                        
+                        const reasonSpan = document.getElementById(`rej-reason-${idx}`);
+                        reasonSpan.querySelector('.reason-prefix').innerText = '⚠️ Previously rejected:';
+                        reasonSpan.style.color = 'var(--muted)';
+                        reasonSpan.style.display = 'block';
                         
                         updateSelectionSummary();
                     }

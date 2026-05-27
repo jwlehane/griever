@@ -802,15 +802,13 @@ async def restore_comp(property_id: int = Form(...), zpid: str = Form(None), add
     if zpid:
         cursor.execute("""
             UPDATE sales_comps 
-            SET status = CASE WHEN sbl = 'UNVERIFIED' THEN 'UNVERIFIED' ELSE 'VERIFIED' END, 
-                rejection_reason = NULL 
+            SET status = CASE WHEN sbl = 'UNVERIFIED' THEN 'UNVERIFIED' ELSE 'VERIFIED' END 
             WHERE target_property_id = ? AND zpid = ?
         """, (property_id, zpid))
     else:
         cursor.execute("""
             UPDATE sales_comps 
-            SET status = CASE WHEN sbl = 'UNVERIFIED' THEN 'UNVERIFIED' ELSE 'VERIFIED' END, 
-                rejection_reason = NULL 
+            SET status = 'MANUAL' 
             WHERE target_property_id = ? AND address = ?
         """, (property_id, address))
     conn.commit()

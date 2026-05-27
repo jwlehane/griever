@@ -795,26 +795,22 @@
             const btn = document.getElementById(`sel-${idx}`);
             const isSelected = btn.classList.contains('selected');
             const endpoint = isSelected ? '/unselect_comp' : '/select_comp';
-            
             const formData = new FormData();
             formData.append('property_id', subjectId);
             if (zpid && zpid !== 'None') formData.append('zpid', zpid);
             formData.append('address', address);
 
+            btn.disabled = true;
             fetch(endpoint, { method: 'POST', body: formData })
                 .then(r => r.json())
                 .then(data => {
-                    if(data.status === 'success') {
-                        if (isSelected) {
-                            btn.classList.remove('selected');
-                            btn.innerText = 'Select';
-                        } else {
-                            btn.classList.add('selected');
-                            btn.innerText = 'Selected';
-                        }
+                    if (data.status === 'success') {
+                        btn.classList.toggle('selected', !isSelected);
+                        btn.innerText = isSelected ? 'Select' : 'Selected';
                         updateSelectionSummary();
                     }
-                });
+                })
+                .finally(() => { btn.disabled = false; });
         }
 
         function openRejectModal(idx, subjectId, zpid, address) {
@@ -827,23 +823,81 @@
 
         function confirmReject() {
             const idx = document.getElementById('rejRow').value;
-            const formData = new FormData();
-            formData.append('property_id', document.getElementById('rejSubjId').value);
-            formData.append('address', document.getElementById('rejAddr').value);
+            const propertyId = document.getElementById('rejSubjId').value;
+            const address = document.getElementById('rejAddr').value;
             const zpid = document.getElementById('rejZpid').value;
+            const reason = document.getElementById('rejectReason').value;
+
+            const formData = new FormData();
+            formData.append('property_id', propertyId);
+            formData.append('address', address);
             if (zpid && zpid !== 'None') formData.append('zpid', zpid);
-            formData.append('reason', document.getElementById('rejectReason').value);
+            formData.append('reason', reason);
 
             fetch('/reject_comp', { method: 'POST', body: formData })
                 .then(r => r.json())
                 .then(data => {
                     if(data.status === 'success') {
-                        document.getElementById(`row-${idx}`).style.display = 'none';
+                        const row = document.getElementById(`row-${idx}`);
+                        row.classList.add('rejected-row');
+                        
+                        const selBtn = document.getElementById(`sel-${idx}`);
+                        selBtn.disabled = true;
+                        if (selBtn.classList.contains('selected')) {
+                            selBtn.classList.remove('selected');
+                            selBtn.innerText = 'Select';
+                        }
+                        
+                        document.getElementById(`rej-btn-${idx}`).style.display = 'none';
+                        document.getElementById(`rest-btn-${idx}`).style.display = 'inline-block';
+                        
+                        const reasonSpan = document.getElementById(`rej-reason-${idx}`);
+                        reasonSpan.querySelector('.reason-prefix').innerText = '🚫 Rejected:';
+                        reasonSpan.querySelector('.reason-text').innerText = reason;
+                        reasonSpan.style.color = 'var(--danger)';
+                        reasonSpan.style.display = 'block';
+
                         document.getElementById('rejectModal').style.display = 'none';
                         updateSelectionSummary();
                     }
                 });
         }
+
+        function restoreComp(idx, subjectId, zpid, address) {
+            const formData = new FormData();
+            formData.append('property_id', subjectId);
+            if (zpid && zpid !== 'None') formData.append('zpid', zpid);
+            formData.append('address', address);
+
+            const restBtn = document.getElementById(`rest-btn-${idx}`);
+            restBtn.disabled = true;
+
+            fetch('/restore_comp', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const row = document.getElementById(`row-${idx}`);
+                        row.classList.remove('rejected-row');
+                        
+                        const selBtn = document.getElementById(`sel-${idx}`);
+                        selBtn.disabled = false;
+                        
+                        document.getElementById(`rej-btn-${idx}`).style.display = 'inline-block';
+                        document.getElementById(`rest-btn-${idx}`).style.display = 'none';
+                        
+                        const reasonSpan = document.getElementById(`rej-reason-${idx}`);
+                        reasonSpan.querySelector('.reason-prefix').innerText = '⚠️ Previously rejected:';
+                        reasonSpan.style.color = 'var(--muted)';
+                        reasonSpan.style.display = 'block';
+                        
+                        updateSelectionSummary();
+                    }
+                })
+                .finally(() => {
+                    restBtn.disabled = false;
+                });
+        }
+
 
         // Event delegation for dynamically added form
         document.addEventListener('submit', function(e) {
