@@ -365,21 +365,15 @@
                 sblInput.value = item?.sbl || '';
                 countyInput.value = item?.county || '';
                 zipInput.value = item?.zip || '';
-                if (addressStatus) {
-                    addressStatus.className = item?.parcelgrid ? 'field-help good' : 'field-help warn';
-                    addressStatus.innerText = item?.parcelgrid
+                if (addressStatus && item) {
+                    addressStatus.className = item.parcelgrid ? 'field-help good' : 'field-help warn';
+                    addressStatus.innerText = item.parcelgrid
                         ? `County parcel selected for ${item.county || 'local'} records.`
                         : 'Using a geocoded address fallback. Parcel verification may take longer.';
                 }
             }
-            function render(items, hint) {
-                if (hint) {
-                    list.innerHTML = `<div class="ac-hint">${hint}</div>`;
-                    list.style.display = 'block';
-                    currentItems = [];
-                    return;
-                }
-                if (!items.length) { hide(); return; }
+            function render(items) {
+                if (!items || !items.length) { hide(); return; }
                 currentItems = items;
                 list.innerHTML = items.map((it, i) => `
                     <div class="ac-item" data-i="${i}" role="option">
@@ -410,20 +404,19 @@
             async function fetchSuggestions(q) {
                 if (inFlight) inFlight.abort();
                 inFlight = new AbortController();
-                render([], 'Searching parcels…');
                 if (addressStatus) {
                     addressStatus.className = 'field-help';
-                    addressStatus.innerText = 'Searching parcel records first, then map/geocoder fallback.';
+                    addressStatus.innerText = 'Searching parcel records first, then map/geocoder fallback...';
                 }
                 try {
                     const resp = await fetch(`/autocomplete?q=${encodeURIComponent(q)}`, { signal: inFlight.signal });
                     const data = await resp.json();
                     if (q !== lastQuery) return; // stale
                     if ((data.suggestions || []).length === 0) {
-                        render([], data.error ? 'Lookup unavailable — type the full address.' : 'No matches in Dutchess or Ulster.');
+                        hide();
                         if (addressStatus) {
                             addressStatus.className = 'field-help warn';
-                            addressStatus.innerText = data.error ? 'Autocomplete is unavailable; you can still submit the full address.' : 'No autocomplete match yet. Try adding town and ZIP.';
+                            addressStatus.innerText = data.error ? 'Autocomplete is unavailable; you can still submit the full address.' : 'No matches in Dutchess or Ulster.';
                         }
                     } else {
                         render(data.suggestions);
@@ -441,26 +434,48 @@
                 setSelectedSuggestion(null);
                 lastQuery = q;
                 clearTimeout(debounceTimer);
-                if (!/^\d+\s+\S/.test(q)) {
-                    if (/^\d+\s*$/.test(q)) {
-                        render([], 'Keep typing the street name…');
-                        if (addressStatus) addressStatus.innerText = 'Keep typing the street name.';
-                    } else {
-                        hide();
-                        if (addressStatus) addressStatus.innerText = 'Start with a house number and street; parcel-backed matches will verify fastest.';
+                
+                const match = q.match(/^\d+\s+(.+)$/);
+                const streetPart = match ? match[1].trim() : '';
+                if (!match || streetPart.length < 3) {
+                    hide();
+                    if (addressStatus) {
+                        addressStatus.className = 'field-help';
+                        if (/^\d+\s*\S{0,2}$/.test(q)) {
+                            addressStatus.innerText = 'Keep typing the street name…';
+                        } else {
+                            addressStatus.innerText = 'Start with a house number and street; parcel-backed matches will verify fastest.';
+                        }
                     }
                     return;
                 }
-                debounceTimer = setTimeout(() => fetchSuggestions(q), 180);
+                if (addressStatus) {
+                    addressStatus.className = 'field-help';
+                    addressStatus.innerText = 'Searching...';
+                }
+                debounceTimer = setTimeout(() => fetchSuggestions(q), 250);
             });
             input.addEventListener('keydown', (e) => {
-                if (list.style.display !== 'block' || !currentItems.length) return;
-                if (e.key === 'ArrowDown') { e.preventDefault(); highlight((activeIdx + 1) % currentItems.length); }
-                else if (e.key === 'ArrowUp') { e.preventDefault(); highlight((activeIdx - 1 + currentItems.length) % currentItems.length); }
-                else if (e.key === 'Enter') {
-                    if (activeIdx >= 0) { e.preventDefault(); choose(activeIdx); }
-                } else if (e.key === 'Escape') {
+                if (e.key === 'Enter') {
+                    if (list.style.display === 'block' && currentItems.length && activeIdx >= 0) {
+                        e.preventDefault();
+                        choose(activeIdx);
+                    } else {
+                        e.preventDefault();
+                        searchProperty();
+                    }
+                } else if (e.key === 'Tab') {
                     hide();
+                } else if (list.style.display === 'block' && currentItems.length) {
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        highlight((activeIdx + 1) % currentItems.length);
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        highlight((activeIdx - 1 + currentItems.length) % currentItems.length);
+                    } else if (e.key === 'Escape') {
+                        hide();
+                    }
                 }
             });
             document.addEventListener('click', (e) => {

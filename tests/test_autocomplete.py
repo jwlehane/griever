@@ -72,3 +72,86 @@ def test_dutchess_street_parts_abbreviates_south_parsonage_street():
         "PARSONAGE",
     ]
 
+
+def test_dutchess_suggest_addresses_filters_by_swis_options():
+    from app.counties.dutchess import DutchessCounty
+    from unittest.mock import patch, MagicMock
+
+    handler = DutchessCounty()
+    
+    with patch.object(handler.session, 'get') as mock_get:
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "success": True,
+            "data": [
+                {
+                    "parcelgrid": "135089123456",
+                    "id": "135089123456",
+                    "loc_st_nbr": "123",
+                    "loc_st_name": "MAIN",
+                    "loc_mail_st_suff": "ST",
+                    "loc_muni_name": "RHINEBECK",
+                    "loc_zip": "12572"
+                }
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        # Call suggest_addresses with a specific swis_options list (only Rhinebeck: 135089)
+        results = handler.suggest_addresses("123 Main St", swis_options=["135089"])
+        
+        # Verify it only called session.get for SWIS code 135089
+        assert len(results) == 1
+        assert results[0]["town"] == "Rhinebeck"
+        assert results[0]["parcelgrid"] == "135089123456"
+        
+        # Check that mock_get was called with 'swis': '135089'
+        called_args, called_kwargs = mock_get.call_args
+        assert called_kwargs['params']['swis'] == '135089'
+
+
+def test_main_autocomplete_route_uses_census_preflight():
+    import asyncio
+    from main import autocomplete
+    from unittest.mock import patch, MagicMock
+    from fastapi import Request
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.headers = {}
+    
+    census_mock = [
+        {
+            "label": "123 Main St, Poughkeepsie, NY 12601",
+            "value": "123 Main St, Poughkeepsie, NY 12601",
+            "address": "123 Main St",
+            "town": "Poughkeepsie",
+            "county": "Dutchess",
+            "zip": "12601",
+            "parcelgrid": "",
+            "sbl": "",
+            "source": "census"
+        }
+    ]
+
+    with patch('main._census_autocomplete') as mock_census_ac, \
+         patch('main._parcel_autocomplete') as mock_parcel_ac:
+        
+        mock_census_ac.return_value = (census_mock, "")
+        mock_parcel_ac.return_value = []
+        
+        # Run async function using the active or new event loop without closing it
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        resp = loop.run_until_complete(autocomplete(mock_request, q="123 Main St"))
+        
+        mock_census_ac.assert_any_call("123 Main St", limit=5, timeout=2.0)
+        
+        called_args, called_kwargs = mock_parcel_ac.call_args
+        assert "swis_options" in called_kwargs
+        swis_opts = called_kwargs["swis_options"]
+        assert "134689" in swis_opts or "131300" in swis_opts
+

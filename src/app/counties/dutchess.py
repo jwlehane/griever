@@ -196,7 +196,7 @@ class DutchessCounty(CountyInterface):
         print(f"  NOT FOUND")
         return None
 
-    def suggest_addresses(self, address_string: str, limit: int = 8) -> list[dict]:
+    def suggest_addresses(self, address_string: str, limit: int = 8, swis_options: list[str] = None) -> list[dict]:
         """Return parcel-backed address suggestions for autocomplete."""
         raw_input = address_string.upper().strip()
         match_num = re.match(r'^(\d+)', raw_input)
@@ -210,11 +210,6 @@ class DutchessCounty(CountyInterface):
 
         predir, street_options = _clean_street_parts(street_part)
 
-        swis_options = []
-        for code, name in self.swis_map.items():
-            if name.upper() in raw_input:
-                swis_options.append(code)
-
         # Check if the user specified a suffix to validate
         expected_suffix = None
         for suffix in _SUFFIXES:
@@ -222,13 +217,19 @@ class DutchessCounty(CountyInterface):
                 expected_suffix = _CANONICAL_SUFFIXES.get(suffix.strip())
                 break
 
-        # Avoid autocomplete fan-out across every Dutchess municipality while
-        # the user is still typing, unless the street part is long enough
-        # (at least 4 chars) to search in parallel across all towns.
-        if not swis_options:
-            if len(street_part) < 4:
-                return []
-            swis_options = list(self.swis_map.keys())
+        if swis_options is None:
+            swis_options = []
+            for code, name in self.swis_map.items():
+                if name.upper() in raw_input:
+                    swis_options.append(code)
+
+            # Avoid autocomplete fan-out across every Dutchess municipality while
+            # the user is still typing, unless the street part is long enough
+            # (at least 4 chars) to search in parallel across all towns.
+            if not swis_options:
+                if len(street_part) < 4:
+                    return []
+                swis_options = list(self.swis_map.keys())
 
         suggestions = []
         seen = set()

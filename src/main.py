@@ -131,7 +131,7 @@ def _normalize_parcel_suggestion(item: dict) -> dict:
     }
 
 
-def _parcel_autocomplete(q: str, limit: int = 8) -> list[dict]:
+def _parcel_autocomplete(q: str, limit: int = 8, swis_options: list[str] = None) -> list[dict]:
     detected = CountyFactory.detect_county(address_string=q)
     handlers = [UlsterCounty(timeout=4)] if detected == "ulster" else [DutchessCounty()]
 
@@ -141,7 +141,10 @@ def _parcel_autocomplete(q: str, limit: int = 8) -> list[dict]:
         if not hasattr(handler, "suggest_addresses"):
             continue
         try:
-            for item in handler.suggest_addresses(q, limit=limit):
+            kwargs = {}
+            if isinstance(handler, DutchessCounty) and swis_options is not None:
+                kwargs["swis_options"] = swis_options
+            for item in handler.suggest_addresses(q, limit=limit, **kwargs):
                 normalized = _normalize_parcel_suggestion(item)
                 key = normalized.get("parcelgrid") or (normalized["address"].upper(), normalized.get("zip"))
                 if key in seen:
@@ -155,14 +158,14 @@ def _parcel_autocomplete(q: str, limit: int = 8) -> list[dict]:
     return suggestions
 
 
-def _census_autocomplete(q: str, limit: int = 8, existing_keys=None) -> tuple[list[dict], str]:
+def _census_autocomplete(q: str, limit: int = 8, existing_keys=None, timeout: float = 6) -> tuple[list[dict], str]:
     existing_keys = existing_keys or set()
     address_query = q if re.search(r"\bNY\b", q, re.IGNORECASE) else f"{q}, NY"
     try:
         resp = requests.get(
             CENSUS_GEOCODER_URL,
             params={"address": address_query, "benchmark": "Public_AR_Current", "format": "json"},
-            timeout=6,
+            timeout=timeout,
         )
         resp.raise_for_status()
         matches = resp.json().get("result", {}).get("addressMatches", []) or []
@@ -226,7 +229,36 @@ async def autocomplete(request: Request, q: str = ""):
     if cache_key in _AC_CACHE:
         return JSONResponse({"suggestions": _AC_CACHE[cache_key]})
 
-    suggestions = _parcel_autocomplete(q, limit=8)
+    # Detect county to decide optimization path
+    detected_county = CountyFactory.detect_county(address_string=q)
+    
+    swis_options = None
+    if detected_county == "dutchess":
+        dutchess_handler = DutchessCounty()
+        # If user explicitly types a town name, use that swis only (fast)
+        explicit_swis = [
+            code for code, name in dutchess_handler.swis_map.items()
+            if name.upper() in q.upper()
+        ]
+        if explicit_swis:
+            swis_options = explicit_swis
+        else:
+            # Query Census geocoder first with a short timeout to extract town name
+            # and avoid querying 29 municipalities in parallel on the Dutchess server.
+            try:
+                census_candidates, _ = _census_autocomplete(q, limit=5, timeout=2.0)
+                candidate_swis = set()
+                for item in census_candidates:
+                    if item.get("county") == "Dutchess":
+                        for code, name in dutchess_handler.swis_map.items():
+                            if name.lower() == item["town"].lower():
+                                candidate_swis.add(code)
+                if candidate_swis:
+                    swis_options = list(candidate_swis)
+            except Exception as ce:
+                print(f"Census pre-flight for swis search failed: {ce}")
+
+    suggestions = _parcel_autocomplete(q, limit=8, swis_options=swis_options)
     existing_keys = {(s["address"].upper(), s.get("zip")) for s in suggestions}
     if len(suggestions) < 8:
         census_items, census_error = _census_autocomplete(q, limit=8 - len(suggestions), existing_keys=existing_keys)
