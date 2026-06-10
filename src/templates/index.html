@@ -542,6 +542,8 @@
                         document.getElementById('search-box').style.display = 'none';
                         document.getElementById('subject-card-container').style.display = 'block';
                         document.getElementById('verification-step').style.display = 'block';
+                        const startBtn = document.getElementById('start-btn');
+                        if (startBtn) startBtn.disabled = false;
                         log.innerHTML += `> Property confirmed: ${currentSubject.address}\n`;
                     } else {
                         log.innerHTML += `<span style="color: #e74c3c;">> ${data.message}</span>\n`;
@@ -563,6 +565,8 @@
             document.getElementById('verification-step').style.display = 'none';
             document.getElementById('search-btn').disabled = false;
             document.getElementById('search-btn').innerText = "Find My Property";
+            const startBtn = document.getElementById('start-btn');
+            if (startBtn) startBtn.disabled = false;
             selectedAddressSuggestion = null;
             document.getElementById('selected-parcelgrid').value = '';
             document.getElementById('selected-sbl').value = '';
