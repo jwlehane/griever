@@ -70,6 +70,13 @@ def test_index_template_exposes_progress_and_safe_resume_hooks():
     assert "setOptionalDisplay('resume-btn'" in html
 
 
+def test_index_template_exposes_button_reset_logic():
+    html = _env().get_template('index.html').render()
+
+    assert "const startBtn = document.getElementById('start-btn');" in html
+    assert "startBtn.disabled = false;" in html
+
+
 def test_curation_template_blocks_finalize_until_three_selected():
     html = _env().get_template('curation.html').render(
         subject=_subject(),
