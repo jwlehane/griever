@@ -28,6 +28,35 @@ except ImportError:
     _PSYCOPG2_AVAILABLE = False
 
 
+_use_sqlite_fallback = False
+_fallback_notified = False
+
+
+def _activate_sqlite_fallback(error: Exception):
+    global _use_sqlite_fallback, _fallback_notified
+    _use_sqlite_fallback = True
+    print(f"[DATABASE FALLBACK] Postgres connection failed: {error}. Falling back to SQLite.")
+
+    if not _fallback_notified:
+        _fallback_notified = True
+        try:
+            from app.utils import send_error_report
+            msg = (
+                f"DATABASE CONNECTION FAILURE DETECTED.\n"
+                f"The application was configured to connect to a Postgres database via DATABASE_URL,\n"
+                f"but the connection attempt failed. This usually indicates that the Cloud SQL instance\n"
+                f"is stopped or offline.\n\n"
+                f"Action taken: The application has transparently fallen back to local ephemeral SQLite\n"
+                f"to keep the application functional. The user will not experience downtime, but\n"
+                f"data written during this time will be local/ephemeral.\n\n"
+                f"Postgres Connection Error: {error}"
+            )
+            fallback_exc = RuntimeError("Cloud SQL Offline Fallback Activated")
+            send_error_report(fallback_exc, context={"detail": msg})
+        except Exception as ne:
+            print(f"Failed to send fallback admin notification: {ne}")
+
+
 def _database_url() -> str | None:
     """Read DATABASE_URL fresh from the environment each time.
 
@@ -46,8 +75,14 @@ def get_connection(sqlite_path: str = 'grievance_data.db'):
     """Return a connection. Postgres if DATABASE_URL is set (sqlite_path is
     ignored in that case), otherwise SQLite at `sqlite_path`."""
     db_url = _database_url()
-    if db_url:
-        return PostgresConnection(psycopg2.connect(db_url))
+    if db_url and not _use_sqlite_fallback:
+        try:
+            if not _PSYCOPG2_AVAILABLE:
+                raise ImportError("psycopg2 is not installed or available")
+            return PostgresConnection(psycopg2.connect(db_url))
+        except Exception as e:
+            _activate_sqlite_fallback(e)
+
     conn = sqlite3.connect(sqlite_path)
     conn.row_factory = sqlite3.Row
     return SQLiteConnection(conn)
@@ -60,30 +95,38 @@ def init_schema(sqlite_path: str = 'grievance_data.db'):
     so this is safe to run on every boot.
     """
     db_url = _database_url()
-    schema_file = "schema_postgres.sql" if db_url else "schema_sqlite.sql"
-    sql = (_SCHEMA_DIR / schema_file).read_text()
 
-    if db_url:
-        conn = psycopg2.connect(db_url)
+    if db_url and not _use_sqlite_fallback:
         try:
-            with conn.cursor() as cur:
-                cur.execute(sql)
-            conn.commit()
-        finally:
-            conn.close()
-    else:
-        conn = sqlite3.connect(sqlite_path)
-        try:
-            conn.executescript(sql)
-            conn.commit()
-        finally:
-            conn.close()
+            if not _PSYCOPG2_AVAILABLE:
+                raise ImportError("psycopg2 is not installed or available")
+            conn = psycopg2.connect(db_url)
+            try:
+                schema_file = "schema_postgres.sql"
+                sql = (_SCHEMA_DIR / schema_file).read_text()
+                with conn.cursor() as cur:
+                    cur.execute(sql)
+                conn.commit()
+            finally:
+                conn.close()
+            return
+        except Exception as e:
+            _activate_sqlite_fallback(e)
+
+    schema_file = "schema_sqlite.sql"
+    sql = (_SCHEMA_DIR / schema_file).read_text()
+    conn = sqlite3.connect(sqlite_path)
+    try:
+        conn.executescript(sql)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def is_postgres() -> bool:
     """Lets call sites pick driver-specific syntax (UPSERT, table-exists)
     without re-reading the env var."""
-    return bool(_database_url())
+    return bool(_database_url()) and not _use_sqlite_fallback
 
 
 def upsert_sql(table: str, columns: list[str], conflict_cols: list[str],
