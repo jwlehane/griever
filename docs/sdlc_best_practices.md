@@ -11,8 +11,10 @@ We maintain three distinct environments to ensure stability:
 | Environment | Purpose | Database | Host Platform | DNS Target |
 | :--- | :--- | :--- | :--- | :--- |
 | **Development** | Local coding, testing, and debugging. | SQLite (`grievance_data.db`) | Local localhost:8080 | N/A |
-| **Staging** | Peer testing, QA, and integration checks. | Postgres (Staging DB) | Cloud Run (`nygriever-staging`) | `staging.griever.johnnylehane.com` |
-| **Production** | Live system serving real property owners. | Postgres (Prod Cloud SQL) | Cloud Run (`nygriever`) | `griever.johnnylehane.com` |
+| **Staging** | Peer testing, QA, and integration checks. | Postgres (Staging DB)* | Cloud Run (`nygriever-staging`) | `staging.griever.johnnylehane.com` |
+| **Production** | Live system serving real property owners. | Postgres (Prod Cloud SQL)* | Cloud Run (`nygriever`) | `griever.johnnylehane.com` |
+
+\* **Cost-Savings & Offline Fallback:** During non-active production periods (off-season), the Cloud SQL instance can be safely shut down. If the database is offline or stopped, the application automatically detects the connection failure, falls back to using local ephemeral SQLite to maintain full user functionality, and dispatches a single admin notification.
 
 ---
 

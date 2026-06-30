@@ -119,6 +119,7 @@ The system is designed to be multi-county. All county-specific logic is isolated
 ### Database
 - **SQLite (Local):** Uses `grievance_data.db` for local normalized storage.
 - **PostgreSQL (Cloud):** Activated automatically if `DATABASE_URL` is defined in the environment. Recommended for Cloud Run deployments.
+- **Offline Fallback:** If `DATABASE_URL` is set but the PostgreSQL database is stopped or offline (e.g., to save costs during non-active production periods), the application will gracefully fall back to local SQLite, keeping all features active and online. It will also send a single administrative notification (via Sentry, SMTP, and Cloud Logging) on startup to alert the admin.
 - **Persistence:** Discovery results are written to the database immediately to allow for session resumption and "repairing" of incomplete data.
 
 ---
