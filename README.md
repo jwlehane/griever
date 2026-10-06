@@ -85,7 +85,13 @@ gcloud secrets add-iam-policy-binding nygriever-rapidapi-key \
 ```
 
 ### 3. Persistent Database Setup (Cloud SQL)
-Since Cloud Run is stateless, hook it up to a persistent PostgreSQL instance. Run the provisioning script to create/link the database for the environment:
+Since Cloud Run is stateless, hook it up to a persistent PostgreSQL instance.
+
+> **Status Note (September 2, 2026):**
+> The Cloud SQL instance (`tax-grieve-db`) was torn down to eliminate idle storage and reservation fees. The Cloud Run service automatically falls back to local SQLite if no live database is present. Follow the instructions below to reconstitute the database when needed.
+
+#### Reconstituting the Cloud SQL Instance
+To recreate the PostgreSQL instance and re-link it to Cloud Run, execute:
 
 ```bash
 ./provision_db.sh staging
@@ -93,7 +99,13 @@ Since Cloud Run is stateless, hook it up to a persistent PostgreSQL instance. Ru
 ./provision_db.sh prod
 ```
 
-**Note:** The scripts default to the `us-east1` region, project `double-zenith-89117`, and target `nygriever-staging` or `nygriever` depending on the environment parameter.
+This automated script will:
+1. Create the `tax-grieve-db` instance in GCP project `double-zenith-89117` (`us-east1`, `db-f1-micro`, PostgreSQL 15).
+2. Create the target database (`grievance_data_staging` or `grievance_data_prod`).
+3. Create the database user `griever_app` with credentials.
+4. Attach the Cloud SQL instance connection to the Cloud Run service (`nygriever-staging` or `nygriever`) and inject `DATABASE_URL` via the Cloud SQL proxy.
+
+**Note:** The scripts default to region `us-east1`, project `double-zenith-89117`, and target `nygriever-staging` or `nygriever` depending on the environment parameter.
 
 ---
 
